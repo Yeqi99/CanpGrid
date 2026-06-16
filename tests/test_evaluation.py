@@ -14,6 +14,16 @@ def test_evaluate_interactions_classifies_correct_prediction() -> None:
     assert result["rows"][0]["category"] == "correct"
 
 
+def test_evaluate_interactions_uses_stable_id_as_semantic_alias() -> None:
+    result = evaluate_interactions(
+        [{"id": "page_settings", "label": "页面设置", "role": "button", "bbox": [90, 20, 190, 60]}],
+        [{"label": "page settings", "role": "button", "click_point": [120, 40]}],
+    )
+
+    assert result["summary"]["correct_count"] == 1
+    assert result["rows"][0]["category"] == "correct"
+
+
 def test_evaluate_interactions_classifies_localization_error() -> None:
     result = evaluate_interactions(
         [{"id": "search", "label": "search button", "role": "button", "bbox": [90, 20, 130, 60]}],

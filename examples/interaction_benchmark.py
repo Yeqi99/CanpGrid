@@ -88,6 +88,7 @@ def main() -> None:
         images=[image_path, grid_image],
         prompt=canpgrid_prompt(image_size, grid_size),
         timeout=args.timeout,
+        grid_size=grid_size,
     )
 
     direct_eval = evaluate_interactions(annotations, direct["predictions"])
@@ -147,6 +148,7 @@ def run_model(
     images: list[Path],
     prompt: str,
     timeout: int,
+    grid_size: list[int] | None = None,
 ) -> dict[str, Any]:
     response = call_kimi(
         api_key=api_key,
@@ -157,7 +159,7 @@ def run_model(
         timeout=timeout,
     )
     try:
-        predictions = parse_predictions(response["content"], image_size)
+        predictions = parse_predictions(response["content"], image_size, grid_size=grid_size)
         parse_error = None
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         predictions = []
@@ -174,9 +176,13 @@ def run_model(
 def direct_prompt(image_size: tuple[int, int]) -> str:
     width, height = image_size
     return f"""
-You are looking at an app screenshot. Identify every visible interactive
-clickable/tappable UI element: buttons, tabs, input fields, checkboxes, switches,
-menu items, links, icon buttons, and other controls.
+You are looking at an app screenshot. Identify only visible interactive
+clickable/tappable focus points: buttons, tabs, input fields, checkboxes,
+switches, menu items, links, icon buttons, and other controls.
+
+Return one click point per interactive control. Do not return bounding boxes.
+Do not mark decorative images, status text, ordinary content text, cards, or
+search suggestions unless the region itself is clearly tappable.
 
 Image size is {width}x{height} pixels. Origin is top-left.
 
@@ -186,7 +192,6 @@ Return raw JSON only:
     {{
       "label": "search",
       "role": "button",
-      "bbox": {{"x1": 10, "y1": 20, "x2": 80, "y2": 70}},
       "click_point": {{"x": 45, "y": 45}},
       "confidence": 0.8
     }}
@@ -202,10 +207,19 @@ You are given two images of the same app screenshot:
 1. the original screenshot
 2. a CanpGrid global grid overlay with {grid_size[0]} columns and {grid_size[1]} rows
 
-Identify every visible interactive clickable/tappable UI element: buttons, tabs,
+Identify only visible interactive clickable/tappable focus points: buttons, tabs,
 input fields, checkboxes, switches, menu items, links, icon buttons, and other
-controls. Use the grid overlay to reduce spatial mistakes, but return final
-coordinates in original image pixels.
+controls.
+
+Return one structured click point per interactive control. Do not return bounding boxes.
+Do not mark decorative images, status text, ordinary content text, cards, or
+search suggestions unless the region itself is clearly tappable.
+
+Use the CanpGrid overlay for localization. The grid has zero-indexed cells:
+columns 0..{grid_size[0] - 1}, rows 0..{grid_size[1] - 1}. For each control,
+return the cell containing the focus point and a normalized point inside that
+cell. cell_point x=0 is the cell left edge, x=1 is the right edge, y=0 is the
+top edge, y=1 is the bottom edge.
 
 Image size is {width}x{height} pixels. Origin is top-left.
 
@@ -215,8 +229,8 @@ Return raw JSON only:
     {{
       "label": "search",
       "role": "button",
-      "bbox": {{"x1": 10, "y1": 20, "x2": 80, "y2": 70}},
-      "click_point": {{"x": 45, "y": 45}},
+      "grid_cell": {{"col": 2, "row": 1}},
+      "cell_point": {{"x": 0.5, "y": 0.5}},
       "confidence": 0.8
     }}
   ]
@@ -266,8 +280,23 @@ def annotation_bbox(value: Any) -> tuple[float, float, float, float]:
     return min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)
 
 
-def parse_predictions(content: str, image_size: tuple[int, int]) -> list[dict[str, Any]]:
-    data = json.loads(extract_json_text(content))
+def parse_predictions(
+    content: str,
+    image_size: tuple[int, int],
+    *,
+    grid_size: list[int] | None = None,
+) -> list[dict[str, Any]]:
+    json_text = extract_json_text(content)
+    try:
+        data = json.loads(json_text)
+    except json.JSONDecodeError as exc:
+        repaired = repair_common_json_key_typos(json_text)
+        if repaired == json_text:
+            raise
+        try:
+            data = json.loads(repaired)
+        except json.JSONDecodeError:
+            raise exc from None
     if isinstance(data, list):
         items = data
     elif isinstance(data, dict):
@@ -280,20 +309,30 @@ def parse_predictions(content: str, image_size: tuple[int, int]) -> list[dict[st
     for index, item in enumerate(items):
         if not isinstance(item, dict):
             continue
-        parsed = normalize_prediction(item, index, image_size)
+        parsed = normalize_prediction(item, index, image_size, grid_size=grid_size)
         if parsed is not None:
             predictions.append(parsed)
     return predictions
 
 
 def normalize_prediction(
-    item: dict[str, Any], index: int, image_size: tuple[int, int]
+    item: dict[str, Any],
+    index: int,
+    image_size: tuple[int, int],
+    *,
+    grid_size: list[int] | None = None,
 ) -> dict[str, Any] | None:
     bbox = item.get("bbox")
     point = item.get("click_point", item.get("point"))
+    grid_point = item.get("grid_point")
     if bbox is None and point is None and "x" in item and "y" in item:
         point = {"x": item["x"], "y": item["y"]}
-    if bbox is None and point is None:
+    if grid_point is None and "grid_cell" in item:
+        grid_point = {
+            "grid_cell": item.get("grid_cell"),
+            "cell_point": item.get("cell_point", item.get("within_cell", {"x": 0.5, "y": 0.5})),
+        }
+    if bbox is None and point is None and grid_point is None:
         return None
 
     parsed: dict[str, Any] = {
@@ -303,10 +342,15 @@ def normalize_prediction(
         "role": str(item.get("role", item.get("type", ""))),
         "confidence": item.get("confidence"),
     }
-    if bbox is not None:
-        parsed["bbox"] = normalize_bbox(bbox, image_size)
     if point is not None:
         parsed["click_point"] = normalize_point(point, image_size)
+        parsed["point_source"] = "click_point"
+    elif grid_point is not None and grid_size is not None:
+        parsed["click_point"] = normalize_grid_point(grid_point, grid_size, image_size)
+        parsed["point_source"] = "grid_cell_point"
+    elif bbox is not None:
+        parsed["click_point"] = bbox_center_point(normalize_bbox(bbox, image_size))
+        parsed["point_source"] = "bbox_center_fallback"
     return parsed
 
 
@@ -335,6 +379,13 @@ def normalize_bbox(value: Any, image_size: tuple[int, int]) -> dict[str, float]:
     }
 
 
+def bbox_center_point(bbox: dict[str, float]) -> dict[str, float]:
+    return {
+        "x": (bbox["x1"] + bbox["x2"]) / 2,
+        "y": (bbox["y1"] + bbox["y2"]) / 2,
+    }
+
+
 def normalize_point(value: Any, image_size: tuple[int, int]) -> dict[str, float]:
     if isinstance(value, dict):
         x = float(value["x"])
@@ -345,6 +396,44 @@ def normalize_point(value: Any, image_size: tuple[int, int]) -> dict[str, float]
         raise ValueError("click_point must be mapping or [x,y]")
     width, height = image_size
     return {"x": clamp(x, 0, width), "y": clamp(y, 0, height)}
+
+
+def normalize_grid_point(
+    value: Any, grid_size: list[int], image_size: tuple[int, int]
+) -> dict[str, float]:
+    if not isinstance(value, dict):
+        raise ValueError("grid_point must be a mapping")
+    cell = value.get("grid_cell", value.get("cell"))
+    cell_point = value.get("cell_point", value.get("within_cell", {"x": 0.5, "y": 0.5}))
+    col, row = normalize_cell(cell)
+    local_x, local_y = normalize_local_point(cell_point)
+    cols, rows = grid_size
+    width, height = image_size
+    x = (clamp(col, 0, cols - 1) + clamp(local_x, 0, 1)) * (width / cols)
+    y = (clamp(row, 0, rows - 1) + clamp(local_y, 0, 1)) * (height / rows)
+    return {"x": clamp(x, 0, width), "y": clamp(y, 0, height)}
+
+
+def normalize_cell(value: Any) -> tuple[float, float]:
+    if isinstance(value, dict):
+        col = float(value.get("col", value.get("column", value.get("x"))))
+        row = float(value.get("row", value.get("y")))
+    elif isinstance(value, (list, tuple)) and len(value) == 2:
+        col, row = [float(part) for part in value]
+    else:
+        raise ValueError("grid_cell must be mapping or [col,row]")
+    return col, row
+
+
+def normalize_local_point(value: Any) -> tuple[float, float]:
+    if isinstance(value, dict):
+        x = float(value.get("x", value.get("u")))
+        y = float(value.get("y", value.get("v")))
+    elif isinstance(value, (list, tuple)) and len(value) == 2:
+        x, y = [float(part) for part in value]
+    else:
+        raise ValueError("cell_point must be mapping or [x,y]")
+    return x, y
 
 
 def extract_json_text(content: str) -> str:
@@ -363,6 +452,77 @@ def extract_json_text(content: str) -> str:
     if end == -1 or end <= start:
         raise ValueError(f"response did not contain complete JSON: {content!r}")
     return stripped[start : end + 1]
+
+
+def repair_common_json_key_typos(text: str) -> str:
+    result: list[str] = []
+    index = 0
+    length = len(text)
+    in_string = False
+    escape = False
+    expecting_key = False
+
+    while index < length:
+        char = text[index]
+
+        if in_string:
+            result.append(char)
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+
+        if char == '"':
+            in_string = True
+            result.append(char)
+            index += 1
+            continue
+
+        if char in "{,":
+            expecting_key = True
+            result.append(char)
+            index += 1
+            continue
+
+        if expecting_key and char.isspace():
+            result.append(char)
+            index += 1
+            continue
+
+        if expecting_key and (char.isalpha() or char == "_"):
+            key_start = index
+            index += 1
+            while index < length and (text[index].isalnum() or text[index] == "_"):
+                index += 1
+            key = text[key_start:index]
+            if index < length and text[index] == '"':
+                index += 1
+            lookahead = index
+            while lookahead < length and text[lookahead].isspace():
+                lookahead += 1
+            if lookahead < length and text[lookahead] == ":":
+                result.append(f'"{key}"')
+                result.append(text[index:lookahead])
+                result.append(":")
+                index = lookahead + 1
+                expecting_key = False
+                continue
+            result.append(text[key_start:index])
+            expecting_key = False
+            continue
+
+        if char == ":":
+            expecting_key = False
+        elif not char.isspace():
+            expecting_key = False
+        result.append(char)
+        index += 1
+
+    return "".join(result)
 
 
 def draw_truth_map(image_path: Path, annotations: list[dict[str, Any]], out_path: Path) -> Path:
@@ -397,15 +557,15 @@ def draw_prediction_map(image_path: Path, evaluation: dict[str, Any], out_path: 
         color = colors[row["category"]]
         target = row.get("target")
         prediction = row.get("prediction")
-        if target and target.get("bbox"):
-            draw_bbox(draw, target["bbox"], color, width=3)
         if prediction:
-            if prediction.get("bbox"):
-                draw_bbox(draw, prediction["bbox"], color, width=5)
             if prediction.get("click_point"):
                 point = prediction["click_point"]
                 draw_crosshair(draw, point["x"], point["y"], color)
                 draw_label(draw, font, str(index), point["x"] + 12, point["y"] - 12, fill=color)
+        elif target and target.get("click_point"):
+            point = target["click_point"]
+            draw_crosshair(draw, point["x"], point["y"], color)
+            draw_label(draw, font, str(index), point["x"] + 12, point["y"] - 12, fill=color)
     result = Image.alpha_composite(image, overlay).convert("RGB")
     result.save(out_path, format="PNG")
     return out_path
@@ -514,8 +674,9 @@ def write_html(report: dict[str, Any], json_path: Path) -> None:
   <header>
     <h1>Interaction Benchmark</h1>
     <p class="muted">
-      标注真值来自手动圈选的可点击范围。模型自由识别全部交互元素，再按几何和标签
-      归类为漏识别、错识别或位置错误。
+      标注真值来自手动圈选的可点击范围。模型只输出交互点击焦点，再按几何和标签
+      归类为漏识别、错识别、语义错或位置错误。预测图只画焦点点位，人工容差框
+      只在真值图中展示。
     </p>
   </header>
   <main>
@@ -545,11 +706,11 @@ def write_html(report: dict[str, Any], json_path: Path) -> None:
         </figure>
         <figure>
           <img src="{html.escape(relative_asset(report["direct"]["prediction_map"]))}" alt="direct">
-          <figcaption>不用 CanpGrid 的预测与错误。</figcaption>
+          <figcaption>不用 CanpGrid 的点击点预测与错误。</figcaption>
         </figure>
         <figure>
           <img src="{canpgrid_map}" alt="canpgrid">
-          <figcaption>使用 CanpGrid 的预测与错误。</figcaption>
+          <figcaption>使用 CanpGrid 的点击点预测与错误。</figcaption>
         </figure>
       </div>
     </section>

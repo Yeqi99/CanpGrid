@@ -229,22 +229,59 @@ def _geometry_score(
 
 
 def _label_score(target: Mapping[str, Any], pred: Mapping[str, Any]) -> float:
-    target_text = str(target.get("label", "")).strip().lower()
-    pred_text = str(pred.get("label", "")).strip().lower()
-    if not target_text or not pred_text:
-        target_text = str(target.get("role", "")).strip().lower()
-        pred_text = str(pred.get("role", "")).strip().lower()
-    if not target_text or not pred_text:
-        return 0.0
-    if target_text == pred_text:
-        return 1.0
-    if target_text in pred_text or pred_text in target_text:
-        return 0.85
-    return SequenceMatcher(None, target_text, pred_text).ratio()
+    target_texts = _semantic_texts(target)
+    pred_texts = _semantic_texts(pred)
+    if target_texts and pred_texts:
+        return max(
+            _text_score(target_text, pred_text)
+            for target_text in target_texts
+            for pred_text in pred_texts
+        )
+
+    target_roles = _role_texts(target)
+    pred_roles = _role_texts(pred)
+    if target_roles and pred_roles:
+        return max(
+            _text_score(target_text, pred_text)
+            for target_text in target_roles
+            for pred_text in pred_roles
+        )
+    return 0.0
 
 
 def _has_label(item: Mapping[str, Any]) -> bool:
-    return bool(str(item.get("label", "")).strip())
+    return bool(_semantic_texts(item))
+
+
+def _semantic_texts(item: Mapping[str, Any]) -> list[str]:
+    return _unique_texts([item.get("id"), item.get("label"), item.get("name")])
+
+
+def _role_texts(item: Mapping[str, Any]) -> list[str]:
+    return _unique_texts([item.get("role"), item.get("type")])
+
+
+def _unique_texts(values: Sequence[Any]) -> list[str]:
+    results = []
+    seen = set()
+    for value in values:
+        text = _normalize_text(value)
+        if text and text not in seen:
+            results.append(text)
+            seen.add(text)
+    return results
+
+
+def _normalize_text(value: Any) -> str:
+    return str(value or "").strip().lower().replace("_", " ").replace("-", " ")
+
+
+def _text_score(left: str, right: str) -> float:
+    if left == right:
+        return 1.0
+    if left in right or right in left:
+        return 0.85
+    return SequenceMatcher(None, left, right).ratio()
 
 
 def _public_item(item: Mapping[str, Any]) -> dict[str, Any]:

@@ -260,6 +260,14 @@ region annotations from any app screenshot. Upload a screenshot, draw clickable
 boxes, set labels and roles, then export a `canpgrid.interactions.v1` JSON
 manifest.
 
+The annotation boxes are only ground-truth tolerance regions. Model benchmarks
+ask for one click focus point per visible interactive control, not for predicted
+bounding boxes. If a model returns a bbox anyway, the benchmark evaluates its
+center point and renders only point markers in prediction maps.
+In the CanpGrid-assisted pass, the model can return `grid_cell` plus
+`cell_point`; the benchmark resolves that structured point into original-image
+pixels before scoring.
+
 Run a real model benchmark against those annotations:
 
 ```bash
@@ -268,7 +276,7 @@ MOONSHOT_API_KEY=... python examples/interaction_benchmark.py \
   --annotations path/to/annotations.canpgrid.json
 ```
 
-The benchmark asks the model to identify all visible interactive elements and
+The benchmark asks the model to identify all visible interactive click points and
 classifies errors as missed interactives, false positives, localization errors,
 semantic mismatches, duplicates, or correct detections. See
 [docs/interaction-dataset.md](docs/interaction-dataset.md).

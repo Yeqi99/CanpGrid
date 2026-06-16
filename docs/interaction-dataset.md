@@ -3,6 +3,13 @@
 CanpGrid can use manually annotated screenshots as evaluation data for
 interactive-element localization.
 
+The protocol separates two things:
+
+- Human annotations are clickable tolerance regions. They are rectangles because
+  a real control has area.
+- Model predictions are click focus points. Ask the model for one point per
+  visible interactive control, not for bounding boxes.
+
 ## Annotation workflow
 
 Open the static workbench:
@@ -68,13 +75,20 @@ The benchmark always uses real model calls. It compares:
 - direct screenshot observation
 - screenshot plus CanpGrid global grid observation
 
-It asks the model to identify all visible interactive elements, not just a
-target list.
+It asks the model to identify all visible interactive click points, not just a
+target list. If a model ignores the prompt and returns a bbox, the benchmark
+uses that bbox center as the effective click point and still renders the result
+as a point.
+
+For the CanpGrid-assisted pass, the model may return a structured point as
+`grid_cell` plus `cell_point`; the benchmark resolves that reference into
+original-image pixels before scoring. This avoids relying on a model's fragile
+absolute-pixel coordinate sense while still evaluating the final click point.
 
 ## Error categories
 
-- `correct`: the predicted click point or bbox lands inside the annotated
-  clickable region.
+- `correct`: the predicted click point lands inside the annotated clickable
+  region.
 - `missed_interactive`: an annotated interactive region was not found. This is
   a recall/understanding problem.
 - `false_positive`: the model predicted an interactive region that is not in

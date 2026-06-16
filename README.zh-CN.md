@@ -194,6 +194,12 @@ CanpGrid 细尺流程”，并记录 token 消耗。
 手动圈出可点击区域，填写 label/role，然后导出
 `canpgrid.interactions.v1` JSON 标注。
 
+这里的人工框只是评分用的可点击容差范围，不是要求模型预测框。模型评测时只
+要求它为每个可见交互控件给出一个点击焦点。如果模型仍然返回 bbox，脚本会取
+bbox 中心作为实际点击点来评分，并且预测图里仍然只画点。
+在 CanpGrid 辅助分支里，模型可以返回 `grid_cell` + `cell_point` 这种结构化
+点位，脚本再把它解析成原图像素点后评分。
+
 用真实模型 API 评测这份标注：
 
 ```bash
@@ -202,7 +208,7 @@ MOONSHOT_API_KEY=... python examples/interaction_benchmark.py \
   --annotations path/to/annotations.canpgrid.json
 ```
 
-评测脚本会让模型自由识别全部可交互元素，再和你的标注对比，把错误分成：
+评测脚本会让模型自由识别全部可交互点击点，再和你的标注对比，把错误分成：
 漏识别、错识别、语义错、位置错误、重复识别和正确识别。详见
 `docs/interaction-dataset.md`。
 
