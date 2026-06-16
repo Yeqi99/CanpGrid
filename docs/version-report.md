@@ -57,7 +57,7 @@ For model comparisons that need less subjective scoring than real screenshots,
 use the WeChat-like DOM benchmark:
 
 ```bash
-python examples/kimi_wechat_dom_benchmark.py --skip-api
+MOONSHOT_API_KEY="..." python examples/kimi_wechat_dom_benchmark.py
 ```
 
 The HTML output is written to:
@@ -68,10 +68,10 @@ outputs/wechat_dom_benchmark/index.html
 
 This benchmark generates fixture HTML, image fixtures, exact target bbox
 manifests, global CanpGrid views, selected-cell ruler examples, and preview
-images. If `MOONSHOT_API_KEY` is set and `--skip-api` is omitted, it runs model
-comparisons and scores a returned point as a hit only when it lands inside the
-target bbox. It also records visible API token usage when the provider returns
-usage metadata.
+images. It always runs real model comparisons and scores a returned point as a
+hit only when it lands inside the target bbox. If `MOONSHOT_API_KEY` is missing,
+the script fails instead of generating an offline model-test report. It also
+records visible API token usage when the provider returns usage metadata.
 
 This report is intentionally outside CanpGrid Core. It uses a drawn UI screen
 with checkboxes, text fields, and buttons so progress is easier to inspect, but

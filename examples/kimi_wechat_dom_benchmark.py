@@ -60,9 +60,20 @@ def main() -> None:
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--out-dir", default=str(OUT_DIR))
-    parser.add_argument("--max-targets", type=int, default=6)
-    parser.add_argument("--skip-api", action="store_true")
+    parser.add_argument(
+        "--max-targets",
+        type=int,
+        default=0,
+        help="Maximum targets per scenario. Use 0 for all targets.",
+    )
     args = parser.parse_args()
+
+    api_key = os.environ.get("MOONSHOT_API_KEY")
+    if not api_key:
+        raise SystemExit(
+            "MOONSHOT_API_KEY is required. This benchmark always uses real API calls "
+            "and does not generate offline model-test reports."
+        )
 
     OUT_DIR = Path(args.out_dir)
     ASSET_DIR = OUT_DIR / "assets"
@@ -73,28 +84,19 @@ def main() -> None:
 
     scenarios = build_scenarios()
     scenario_reports = prepare_assets(scenarios)
-
-    api_key = os.environ.get("MOONSHOT_API_KEY")
-    run_api = bool(api_key) and not args.skip_api
-    api_status = "ran" if run_api else "skipped_by_flag" if args.skip_api else "skipped_no_key"
-
-    if run_api and api_key is not None:
-        for report in scenario_reports:
-            report["model_results"] = run_model_scenario(
-                report["scenario"],
-                api_key=api_key,
-                base_url=args.base_url,
-                model=args.model,
-                max_targets=args.max_targets,
-            )
-    else:
-        for report in scenario_reports:
-            report["model_results"] = []
+    for report in scenario_reports:
+        report["model_results"] = run_model_scenario(
+            report["scenario"],
+            api_key=api_key,
+            base_url=args.base_url,
+            model=args.model,
+            max_targets=args.max_targets,
+        )
 
     output = {
         "model": args.model,
         "base_url": args.base_url,
-        "api_status": api_status,
+        "api_status": "real_api",
         "grid_size": GRID_SIZE,
         "ruler_size": RULER_SIZE,
         "scenarios": [serialize_report(report) for report in scenario_reports],
@@ -108,7 +110,7 @@ def main() -> None:
             {
                 "html_report": str(HTML_PATH),
                 "json_report": str(OUT_DIR / "wechat_dom_benchmark.json"),
-                "api_status": api_status,
+                "api_status": "real_api",
             },
             ensure_ascii=False,
             indent=2,
@@ -227,7 +229,8 @@ def run_model_scenario(
     )
     grid_path = Path(grid["annotated_image_path"])
     results = []
-    for target in scenario.targets[:max_targets]:
+    targets = scenario.targets if max_targets <= 0 else scenario.targets[:max_targets]
+    for target in targets:
         direct = run_direct_target(scenario, target, api_key, base_url, model)
         with_grid = run_canpgrid_target(
             scenario,
@@ -828,7 +831,7 @@ def render_scenario(scenario: dict[str, Any]) -> str:
     model_results = render_model_results(scenario)
     metrics = scenario.get("metrics")
     fixture_html = html.escape(scenario["fixture_html"])
-    metric_html = "<p class=\"muted\">未运行模型 API；这里只展示可复现 fixture 和标准答案。</p>"
+    metric_html = "<p class=\"muted\">没有模型结果；请检查真实 API 调用是否返回结果。</p>"
     if metrics:
         metric_html = f"<pre>{html.escape(json.dumps(metrics, ensure_ascii=False, indent=2))}</pre>"
     return f"""

@@ -243,13 +243,14 @@ real clicks or add UI automation to Core.
 ## WeChat-Like DOM Benchmark
 
 ```bash
-python examples/kimi_wechat_dom_benchmark.py --skip-api
+MOONSHOT_API_KEY=... python examples/kimi_wechat_dom_benchmark.py
 ```
 
 This generates `outputs/wechat_dom_benchmark/index.html`, a reproducible
 WeChat-like UI benchmark with fixture HTML, exact target bboxes, global grid
-views, selected-cell ruler examples, and point previews. If `MOONSHOT_API_KEY`
-is set and `--skip-api` is omitted, the script compares direct model coordinates
+views, selected-cell ruler examples, and point previews. The script always uses
+real Kimi API calls; if `MOONSHOT_API_KEY` is missing, it fails instead of
+generating an offline model-test report. It compares direct model coordinates
 against the two-step CanpGrid cell-ruler workflow and records token usage.
 
 ## Tests
