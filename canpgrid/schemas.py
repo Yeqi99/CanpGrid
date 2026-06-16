@@ -10,6 +10,8 @@ Cell = tuple[int, int]
 Point = tuple[float, float]
 OverlayMode = Literal["grid", "ruler", "hybrid"]
 DetailMode = Literal["coarse", "medium", "fine"]
+PreviewOn = Literal["current_view", "original_image", "both"]
+MarkerStyle = Literal["ring", "ring_crosshair", "ring_crosshair_inset"]
 
 
 def clean_number(value: float) -> int | float:
@@ -151,6 +153,29 @@ class PointResult:
             "point_on_original": clean_point(self.point_on_original),
             "final_region_bbox_on_original": self.final_region_bbox_on_original.to_dict(),
         }
+
+
+@dataclass(frozen=True)
+class PreviewPointResult:
+    preview_image_path: Path
+    point_on_original: Point
+    final_region_bbox_on_original: BBox
+    point_on_current_view: Point | None = None
+    preview_image_paths: Mapping[str, Path] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "preview_image_path": str(self.preview_image_path),
+            "point_on_original": clean_point(self.point_on_original),
+            "final_region_bbox_on_original": self.final_region_bbox_on_original.to_dict(),
+        }
+        if self.point_on_current_view is not None:
+            data["point_on_current_view"] = clean_point(self.point_on_current_view)
+        if self.preview_image_paths is not None:
+            data["preview_image_paths"] = {
+                key: str(value) for key, value in self.preview_image_paths.items()
+            }
+        return data
 
 
 def coerce_levels(levels: Sequence[Mapping[str, Any] | Level] | None) -> tuple[Level, ...]:

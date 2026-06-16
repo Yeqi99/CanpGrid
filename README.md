@@ -19,6 +19,7 @@ layer.
 - Grid intersection coordinate system
 - Region path to original bbox
 - Flexible point_spec protocol
+- Candidate point preview images
 - CLI and Python API
 - Agent-friendly JSON outputs
 - Calibration-ready design
@@ -47,7 +48,7 @@ CanpGrid requires Python 3.10 or newer.
 ## Python API
 
 ```python
-from canpgrid import create_grid_view, resolve_point, resolve_region, zoom_region
+from canpgrid import create_grid_view, preview_point, resolve_point, resolve_region, zoom_region
 
 view = create_grid_view(
     "examples/sample.png",
@@ -80,10 +81,27 @@ point = resolve_point(
         "ruler_size": [16, 16],
     },
 )
+
+preview = preview_point(
+    "examples/sample.png",
+    levels,
+    {
+        "type": "hybrid_point",
+        "base": ["1/2", "1/2"],
+        "offset": [2, 3],
+        "unit": "ruler_tick",
+        "ruler_size": [16, 16],
+    },
+    preview_on="both",
+    marker_style="ring_crosshair_inset",
+    out_dir="outputs",
+)
 ```
 
 `create_grid_view` and `zoom_region` always return an `annotated_image_path`.
 The bbox metadata is companion data, not the main output.
+`preview_point` creates a non-executing focus preview so an agent can inspect a
+candidate point before confirming or adjusting it.
 
 ## CLI
 
@@ -123,6 +141,12 @@ Resolve a point:
 canpgrid resolve-point examples/sample.png --levels '[{"grid_size":[12,7],"cell":[6,2]}]' --point-spec '{"type":"normalized_point","value":["1/2","1/2"]}'
 ```
 
+Preview a candidate point:
+
+```bash
+canpgrid preview-point examples/sample.png --levels '[{"grid_size":[12,7],"cell":[6,2]}]' --point-spec '{"type":"normalized_point","value":["1/2","1/2"]}' --preview-on both --marker-style ring_crosshair_inset
+```
+
 All CLI commands emit JSON.
 
 ## Protocol Summary
@@ -154,7 +178,8 @@ Point specs include:
 - `subgrid_point`
 
 See [docs/protocol.md](docs/protocol.md) and
-[docs/point-spec.md](docs/point-spec.md) for details.
+[docs/point-spec.md](docs/point-spec.md) for details. See
+[docs/preview-point.md](docs/preview-point.md) for point preview and self-check.
 
 ## Calibration Potential
 

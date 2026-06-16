@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from canpgrid import create_grid_view, resolve_point, resolve_region, zoom_region
+from canpgrid import create_grid_view, preview_point, resolve_point, resolve_region, zoom_region
 
 SAMPLE = ROOT / "examples" / "sample_images" / "sample.png"
 OUT_DIR = ROOT / "outputs" / "demo"
@@ -64,6 +64,36 @@ def main() -> None:
             "ruler_size": [16, 16],
         },
     )
+    first_preview = preview_point(
+        SAMPLE,
+        levels_2,
+        {
+            "type": "hybrid_point",
+            "base": ["1/2", "1/2"],
+            "offset": [2, 3],
+            "unit": "ruler_tick",
+            "ruler_size": [16, 16],
+        },
+        preview_on="both",
+        marker_style="ring_crosshair_inset",
+        zoom_factor=24,
+        out_dir=OUT_DIR,
+    )
+    adjusted_preview = preview_point(
+        SAMPLE,
+        levels_2,
+        {
+            "type": "hybrid_point",
+            "base": ["1/2", "1/2"],
+            "offset": [1, 2],
+            "unit": "ruler_tick",
+            "ruler_size": [16, 16],
+        },
+        preview_on="both",
+        marker_style="ring_crosshair_inset",
+        zoom_factor=24,
+        out_dir=OUT_DIR,
+    )
 
     print(
         json.dumps(
@@ -75,6 +105,8 @@ def main() -> None:
                 "region": region,
                 "normalized_point": normalized_point,
                 "hybrid_point": hybrid_point,
+                "first_preview": first_preview,
+                "adjusted_preview": adjusted_preview,
             },
             ensure_ascii=False,
             indent=2,

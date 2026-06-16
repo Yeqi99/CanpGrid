@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import pytest
+from PIL import Image
 
-from canpgrid import resolve_point
+from canpgrid import preview_point, resolve_point
 
 LEVELS = [
     {"grid_size": [4, 4], "cell": [0, 0]},
@@ -71,3 +72,16 @@ def test_resolve_point_rejects_unknown_point_spec() -> None:
             point_spec={"type": "semantic_button"},
         )
 
+
+def test_preview_point_rejects_unknown_marker_style(tmp_path) -> None:
+    image_path = tmp_path / "sample.png"
+
+    Image.new("RGB", (320, 200), "#ffffff").save(image_path)
+    with pytest.raises(ValueError, match="marker_style"):
+        preview_point(
+            image_path,
+            [],
+            {"type": "normalized_point", "value": ["1/2", "1/2"]},
+            marker_style="solid_dot",
+            out_dir=tmp_path,
+        )

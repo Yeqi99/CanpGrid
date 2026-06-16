@@ -43,3 +43,12 @@ Every `create_grid_view` and `zoom_region` call creates a new annotated image.
 The annotated image is the main artifact for the next observation turn. The
 original-image bbox is companion metadata.
 
+## Candidate point preview
+
+After `resolve_point`, callers can use `preview_point` to generate a visual
+self-check image for the candidate focus point. This lets an agent inspect the
+final focus before deciding whether to confirm, adjust, or relocalize.
+
+Preview does not execute a click. It only marks the candidate point on the
+current local view, the original image, or both.
+

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping, Sequence
+from math import ceil, floor
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ from .grid import suggest_grid_size, validate_grid_size
 from .render import (
     crop_and_zoom,
     draw_overlay,
+    draw_point_preview,
     load_image,
     save_png,
 )
@@ -18,8 +20,11 @@ from .schemas import (
     DetailMode,
     GridViewResult,
     Level,
+    MarkerStyle,
     OverlayMode,
     PointResult,
+    PreviewOn,
+    PreviewPointResult,
     RegionResult,
     RulerConfig,
     coerce_levels,
@@ -151,6 +156,70 @@ def resolve_point(
     return PointResult(point_on_original=point, final_region_bbox_on_original=bbox).to_dict()
 
 
+def preview_point(
+    image_path: str | Path,
+    levels: Sequence[Mapping[str, Any] | Level],
+    point_spec: Mapping[str, Any],
+    *,
+    preview_on: PreviewOn = "current_view",
+    marker_style: MarkerStyle = "ring_crosshair",
+    with_inset: bool = False,
+    out_dir: str | Path = "outputs",
+    zoom_factor: float = 6,
+) -> dict[str, Any]:
+    if preview_on not in {"current_view", "original_image", "both"}:
+        raise ValueError("preview_on must be one of: current_view, original_image, both")
+    if marker_style not in {"ring", "ring_crosshair", "ring_crosshair_inset"}:
+        raise ValueError(
+            "marker_style must be one of: ring, ring_crosshair, ring_crosshair_inset"
+        )
+
+    original = load_image(image_path)
+    resolved_levels = coerce_levels(levels)
+    bbox = resolve_levels_to_bbox((original.width, original.height), resolved_levels)
+    point_on_original = resolve_point_in_bbox(bbox, point_spec)
+    view_id = _view_id()
+    out_path = Path(out_dir)
+
+    preview_paths: dict[str, Path] = {}
+    point_on_current_view = _point_on_current_view(original, bbox, point_on_original, zoom_factor)
+
+    if preview_on in {"current_view", "both"}:
+        current_view = crop_and_zoom(original, bbox, zoom_factor=zoom_factor)
+        current_preview = draw_point_preview(
+            current_view,
+            point_on_current_view,
+            marker_style=marker_style,
+            with_inset=with_inset,
+        )
+        preview_paths["current_view"] = save_png(
+            current_preview,
+            out_path / f"{view_id}_preview_current_{marker_style}.png",
+        )
+
+    if preview_on in {"original_image", "both"}:
+        original_preview = draw_point_preview(
+            original,
+            point_on_original,
+            marker_style=marker_style,
+            with_inset=with_inset,
+        )
+        preview_paths["original_image"] = save_png(
+            original_preview,
+            out_path / f"{view_id}_preview_original_{marker_style}.png",
+        )
+
+    main_key = "current_view" if "current_view" in preview_paths else "original_image"
+    result = PreviewPointResult(
+        preview_image_path=preview_paths[main_key],
+        point_on_original=point_on_original,
+        point_on_current_view=point_on_current_view,
+        final_region_bbox_on_original=bbox,
+        preview_image_paths=preview_paths if preview_on == "both" else None,
+    )
+    return result.to_dict()
+
+
 def _resolve_image_size(
     image_path: str | Path | None, image_size: tuple[int, int] | None
 ) -> tuple[int, int]:
@@ -186,3 +255,31 @@ def _path_label(levels: Sequence[Level]) -> str | None:
         for level in levels
     ]
     return "path " + " > ".join(parts)
+
+
+def _point_on_current_view(
+    image, bbox: BBox, point_on_original: tuple[float, float], zoom_factor: float
+) -> tuple[float, float]:
+    if zoom_factor <= 0:
+        raise ValueError("zoom_factor must be > 0")
+
+    left, top, right, bottom = _int_crop_box(image.width, image.height, bbox)
+    crop_width = right - left
+    crop_height = bottom - top
+    if crop_width <= 0 or crop_height <= 0:
+        raise ValueError("resolved bbox is empty after clamping to image bounds")
+
+    zoomed_width = max(1, round(crop_width * zoom_factor))
+    zoomed_height = max(1, round(crop_height * zoom_factor))
+    return (
+        (point_on_original[0] - left) * (zoomed_width / crop_width),
+        (point_on_original[1] - top) * (zoomed_height / crop_height),
+    )
+
+
+def _int_crop_box(width: int, height: int, bbox: BBox) -> tuple[int, int, int, int]:
+    left = max(0, min(width, floor(bbox.x1)))
+    top = max(0, min(height, floor(bbox.y1)))
+    right = max(0, min(width, ceil(bbox.x2)))
+    bottom = max(0, min(height, ceil(bbox.y2)))
+    return left, top, right, bottom

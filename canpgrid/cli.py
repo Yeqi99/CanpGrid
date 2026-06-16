@@ -6,9 +6,19 @@ from typing import Any
 
 import typer
 
-from .core import create_grid_view, zoom_region
-from .core import resolve_point as api_resolve_point
-from .core import resolve_region as api_resolve_region
+from .core import (
+    create_grid_view,
+    zoom_region,
+)
+from .core import (
+    preview_point as api_preview_point,
+)
+from .core import (
+    resolve_point as api_resolve_point,
+)
+from .core import (
+    resolve_region as api_resolve_region,
+)
 
 app = typer.Typer(
     name="canpgrid",
@@ -106,6 +116,32 @@ def resolve_point(
     _print_json(result)
 
 
+@app.command("preview-point")
+def preview_point(
+    image_path: Path = typer.Argument(..., exists=True, readable=True),
+    levels: str = typer.Option(..., "--levels", help="JSON level path."),
+    point_spec: str = typer.Option(..., "--point-spec", help="JSON point_spec."),
+    preview_on: str = typer.Option("current_view", "--preview-on"),
+    marker_style: str = typer.Option("ring_crosshair", "--marker-style"),
+    with_inset: bool = typer.Option(False, "--with-inset/--no-inset"),
+    zoom_factor: float = typer.Option(6.0, "--zoom-factor"),
+    out: Path = typer.Option(Path("outputs"), "--out"),
+) -> None:
+    """Preview a resolved candidate focus point without executing a click."""
+
+    result = api_preview_point(
+        image_path,
+        _parse_json(levels, "levels"),
+        _parse_json(point_spec, "point_spec"),
+        preview_on=_preview_on(preview_on),
+        marker_style=_marker_style(marker_style),
+        with_inset=with_inset,
+        zoom_factor=zoom_factor,
+        out_dir=out,
+    )
+    _print_json(result)
+
+
 def _parse_json(value: str, field_name: str) -> Any:
     try:
         return json.loads(value)
@@ -142,6 +178,20 @@ def _overlay_mode(value: str) -> str:
 def _detail_mode(value: str) -> str:
     if value not in {"coarse", "medium", "fine"}:
         raise typer.BadParameter("detail_mode must be one of: coarse, medium, fine")
+    return value
+
+
+def _preview_on(value: str) -> str:
+    if value not in {"current_view", "original_image", "both"}:
+        raise typer.BadParameter("preview_on must be one of: current_view, original_image, both")
+    return value
+
+
+def _marker_style(value: str) -> str:
+    if value not in {"ring", "ring_crosshair", "ring_crosshair_inset"}:
+        raise typer.BadParameter(
+            "marker_style must be one of: ring, ring_crosshair, ring_crosshair_inset"
+        )
     return value
 
 
