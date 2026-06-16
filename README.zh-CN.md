@@ -211,6 +211,8 @@ MOONSHOT_API_KEY=... python examples/interaction_benchmark.py \
 评测脚本会让模型自由识别全部可交互点击点，再和你的标注对比，把错误分成：
 漏识别、错识别、语义错、位置错误、重复识别和正确识别。详见
 `docs/interaction-dataset.md`。
+默认还会增加一轮非点击执行的 ReAct 自检：先把 CanpGrid 单次候选点画成
+preview 图，再让模型根据预览确认、修正、删除或补充最终点位。
 
 ## 许可证
 

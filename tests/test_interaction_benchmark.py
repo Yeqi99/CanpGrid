@@ -98,3 +98,47 @@ def test_parse_predictions_resolves_canpgrid_cell_point() -> None:
 
     assert predictions[0]["click_point"] == {"x": 450.0, "y": 1525.0}
     assert predictions[0]["point_source"] == "grid_cell_point"
+
+
+def test_parse_predictions_accepts_react_final_items_metadata() -> None:
+    predictions = parse_predictions(
+        """
+        {
+          "final_items": [
+            {
+              "label": "settings",
+              "role": "button",
+              "grid_cell": {"col": 1, "row": 2},
+              "cell_point": {"x": 0.25, "y": 0.75},
+              "source_marker": 4,
+              "revision": "adjust"
+            }
+          ]
+        }
+        """,
+        (400, 400),
+        grid_size=[4, 4],
+    )
+
+    assert predictions[0]["click_point"] == {"x": 125.0, "y": 275.0}
+    assert predictions[0]["source_marker"] == 4
+    assert predictions[0]["revision"] == "adjust"
+
+
+def test_parse_predictions_accepts_duplicate_coordinate_arrays() -> None:
+    predictions = parse_predictions(
+        """
+        {
+          "items": [
+            {
+              "label": "back",
+              "role": "button",
+              "click_point": {"x": [48, 72], "y": [72, 72]}
+            }
+          ]
+        }
+        """,
+        (100, 100),
+    )
+
+    assert predictions[0]["click_point"] == {"x": 48.0, "y": 72.0}

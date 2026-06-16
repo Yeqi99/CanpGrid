@@ -77,6 +77,8 @@ The benchmark always uses real model calls. It compares:
 
 - direct screenshot observation
 - screenshot plus CanpGrid global grid observation
+- screenshot plus CanpGrid global grid observation, followed by a ReAct-style
+  candidate preview self-check
 
 It asks the model to identify all visible interactive click points, not just a
 target list. If a model ignores the prompt and returns a bbox, the benchmark
@@ -87,6 +89,11 @@ For the CanpGrid-assisted pass, the model may return a structured point as
 `grid_cell` plus `cell_point`; the benchmark resolves that reference into
 original-image pixels before scoring. This avoids relying on a model's fragile
 absolute-pixel coordinate sense while still evaluating the final click point.
+
+The ReAct-style pass remains non-executing. It generates a candidate preview map
+from the single-pass CanpGrid points, sends that preview back to the model, and
+asks the model to confirm, adjust, remove, or add final focus points before
+scoring.
 
 ## Error categories
 

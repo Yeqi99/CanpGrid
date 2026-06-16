@@ -38,6 +38,7 @@ def main() -> None:
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--out-dir", default=str(OUT_DIR))
     parser.add_argument("--grid-size", default="9x20")
+    parser.add_argument("--react-rounds", type=int, default=1)
     parser.add_argument("--timeout", type=int, default=300)
     args = parser.parse_args()
 
@@ -90,9 +91,23 @@ def main() -> None:
         timeout=args.timeout,
         grid_size=grid_size,
     )
+    canpgrid_react = run_react_agent(
+        api_key=api_key,
+        base_url=args.base_url,
+        model=args.model,
+        image_path=image_path,
+        grid_image=grid_image,
+        image_size=image_size,
+        grid_size=grid_size,
+        initial_predictions=canpgrid["predictions"],
+        initial_usage=canpgrid.get("usage"),
+        timeout=args.timeout,
+        rounds=max(args.react_rounds, 0),
+    )
 
     direct_eval = evaluate_interactions(annotations, direct["predictions"])
     canpgrid_eval = evaluate_interactions(annotations, canpgrid["predictions"])
+    react_eval = evaluate_interactions(annotations, canpgrid_react["predictions"])
     direct_map = draw_prediction_map(
         image_path,
         direct_eval,
@@ -102,6 +117,11 @@ def main() -> None:
         image_path,
         canpgrid_eval,
         ASSET_DIR / "canpgrid_prediction_map.png",
+    )
+    react_map = draw_prediction_map(
+        image_path,
+        react_eval,
+        ASSET_DIR / "canpgrid_react_prediction_map.png",
     )
 
     report = {
@@ -126,6 +146,11 @@ def main() -> None:
             "evaluation": canpgrid_eval,
             "prediction_map": str(canpgrid_map),
         },
+        "canpgrid_react": {
+            **canpgrid_react,
+            "evaluation": react_eval,
+            "prediction_map": str(react_map),
+        },
     }
     json_path = OUT_DIR / "interaction_benchmark.json"
     json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -137,6 +162,74 @@ def main() -> None:
             indent=2,
         )
     )
+
+
+def run_react_agent(
+    *,
+    api_key: str,
+    base_url: str,
+    model: str,
+    image_path: Path,
+    grid_image: Path,
+    image_size: tuple[int, int],
+    grid_size: list[int],
+    initial_predictions: list[dict[str, Any]],
+    initial_usage: dict[str, Any] | None,
+    timeout: int,
+    rounds: int,
+) -> dict[str, Any]:
+    current_predictions = initial_predictions
+    round_results = []
+    if rounds <= 0:
+        return {
+            "predictions": current_predictions,
+            "rounds": round_results,
+            "usage": initial_usage,
+            "self_check_usage": None,
+            "prompt_chars": 0,
+        }
+
+    for round_index in range(1, rounds + 1):
+        preview_map = draw_candidate_preview_map(
+            image_path,
+            current_predictions,
+            ASSET_DIR / f"react_round_{round_index}_candidate_preview.png",
+        )
+        prompt = react_prompt(image_size, grid_size, current_predictions, round_index)
+        result = run_model(
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            image_size=image_size,
+            images=[image_path, grid_image, preview_map],
+            prompt=prompt,
+            timeout=timeout,
+            grid_size=grid_size,
+        )
+        result["candidate_preview_map"] = str(preview_map)
+        result["round_index"] = round_index
+        round_results.append(result)
+        current_predictions = result["predictions"]
+
+    self_check_usage = aggregate_usage(result.get("usage") for result in round_results)
+    return {
+        "predictions": current_predictions,
+        "rounds": round_results,
+        "usage": aggregate_usage([initial_usage, self_check_usage]),
+        "self_check_usage": self_check_usage,
+        "prompt_chars": sum(result.get("prompt_chars", 0) for result in round_results),
+    }
+
+
+def aggregate_usage(usages: Any) -> dict[str, Any] | None:
+    totals: dict[str, int] = {}
+    for usage in usages:
+        if not isinstance(usage, dict):
+            continue
+        for key, value in usage.items():
+            if isinstance(value, int):
+                totals[key] = totals.get(key, 0) + value
+    return totals or None
 
 
 def run_model(
@@ -181,8 +274,9 @@ clickable/tappable focus points: buttons, tabs, input fields, checkboxes,
 switches, menu items, links, icon buttons, and other controls.
 
 Return one click point per interactive control. Do not return bounding boxes.
-Do not mark decorative images, status text, ordinary content text, cards, or
-search suggestions unless the region itself is clearly tappable.
+Mark content cards, news rows, search suggestions, and trend items when the app
+presents them as tappable entries. Do not mark decorative images, status text,
+ordinary passive text, or layout chrome.
 
 Image size is {width}x{height} pixels. Origin is top-left.
 
@@ -212,8 +306,9 @@ input fields, checkboxes, switches, menu items, links, icon buttons, and other
 controls.
 
 Return one structured click point per interactive control. Do not return bounding boxes.
-Do not mark decorative images, status text, ordinary content text, cards, or
-search suggestions unless the region itself is clearly tappable.
+Mark content cards, news rows, search suggestions, and trend items when the app
+presents them as tappable entries. Do not mark decorative images, status text,
+ordinary passive text, or layout chrome.
 
 Use the CanpGrid overlay for localization. The grid has zero-indexed cells:
 columns 0..{grid_size[0] - 1}, rows 0..{grid_size[1] - 1}. For each control,
@@ -236,6 +331,76 @@ Return raw JSON only:
   ]
 }}
 """
+
+
+def react_prompt(
+    image_size: tuple[int, int],
+    grid_size: list[int],
+    predictions: list[dict[str, Any]],
+    round_index: int,
+) -> str:
+    width, height = image_size
+    candidates = format_candidate_items(predictions)
+    return f"""
+You are running a ReAct-style visual self-check for interactive UI localization.
+You are given three images of the same app screenshot:
+1. the original screenshot
+2. a CanpGrid global grid overlay with {grid_size[0]} columns and {grid_size[1]} rows
+3. a candidate preview image with numbered ring/crosshair markers from the previous pass
+
+Round {round_index}: inspect the candidate markers visually, then produce the final
+set of visible clickable/tappable focus points. You may confirm good candidates,
+adjust inaccurate candidates, remove passive/decorative candidates, and add missing
+interactive items.
+
+Current candidate list:
+{candidates}
+
+Mark content cards, news rows, search suggestions, and trend items when the app
+presents them as tappable entries. Do not mark decorative images, status text,
+ordinary passive text, or layout chrome.
+
+Prefer structured CanpGrid coordinates. The grid has zero-indexed cells:
+columns 0..{grid_size[0] - 1}, rows 0..{grid_size[1] - 1}. For each final
+control, return the cell containing the focus point and a normalized point inside
+that cell. cell_point x=0 is the cell left edge, x=1 is the right edge, y=0 is
+the top edge, y=1 is the bottom edge.
+
+Image size is {width}x{height} pixels. Origin is top-left. This is only visual
+review and localization; do not execute clicks.
+
+Return raw JSON only:
+{{
+  "items": [
+    {{
+      "label": "search",
+      "role": "button",
+      "grid_cell": {{"col": 2, "row": 1}},
+      "cell_point": {{"x": 0.5, "y": 0.5}},
+      "source_marker": 3,
+      "revision": "confirm",
+      "confidence": 0.8
+    }}
+  ]
+}}
+"""
+
+
+def format_candidate_items(predictions: list[dict[str, Any]]) -> str:
+    items = []
+    for marker, prediction in enumerate(predictions, start=1):
+        point = prediction.get("click_point") or {}
+        items.append(
+            {
+                "marker": marker,
+                "label": prediction.get("label", ""),
+                "role": prediction.get("role", ""),
+                "x": round(float(point.get("x", 0)), 1),
+                "y": round(float(point.get("y", 0)), 1),
+                "source": prediction.get("point_source", ""),
+            }
+        )
+    return json.dumps(items, ensure_ascii=False, separators=(",", ":"))
 
 
 def load_annotations(path: Path) -> list[dict[str, Any]]:
@@ -300,7 +465,7 @@ def parse_predictions(
     if isinstance(data, list):
         items = data
     elif isinstance(data, dict):
-        items = data.get("items", data.get("predictions", []))
+        items = data.get("items", data.get("final_items", data.get("predictions", [])))
     else:
         raise ValueError("model JSON must be an object or list")
     if not isinstance(items, list):
@@ -342,6 +507,10 @@ def normalize_prediction(
         "role": str(item.get("role", item.get("type", ""))),
         "confidence": item.get("confidence"),
     }
+    if "source_marker" in item:
+        parsed["source_marker"] = item["source_marker"]
+    if "revision" in item:
+        parsed["revision"] = item["revision"]
     if point is not None:
         parsed["click_point"] = normalize_point(point, image_size)
         parsed["point_source"] = "click_point"
@@ -388,10 +557,10 @@ def bbox_center_point(bbox: dict[str, float]) -> dict[str, float]:
 
 def normalize_point(value: Any, image_size: tuple[int, int]) -> dict[str, float]:
     if isinstance(value, dict):
-        x = float(value["x"])
-        y = float(value["y"])
+        x = numberish(value["x"])
+        y = numberish(value["y"])
     elif isinstance(value, (list, tuple)) and len(value) == 2:
-        x, y = [float(part) for part in value]
+        x, y = [numberish(part) for part in value]
     else:
         raise ValueError("click_point must be mapping or [x,y]")
     width, height = image_size
@@ -427,13 +596,21 @@ def normalize_cell(value: Any) -> tuple[float, float]:
 
 def normalize_local_point(value: Any) -> tuple[float, float]:
     if isinstance(value, dict):
-        x = float(value.get("x", value.get("u")))
-        y = float(value.get("y", value.get("v")))
+        x = numberish(value.get("x", value.get("u")))
+        y = numberish(value.get("y", value.get("v")))
     elif isinstance(value, (list, tuple)) and len(value) == 2:
-        x, y = [float(part) for part in value]
+        x, y = [numberish(part) for part in value]
     else:
         raise ValueError("cell_point must be mapping or [x,y]")
     return x, y
+
+
+def numberish(value: Any) -> float:
+    if isinstance(value, (list, tuple)):
+        if not value:
+            raise ValueError("empty numeric list")
+        return numberish(value[0])
+    return float(value)
 
 
 def extract_json_text(content: str) -> str:
@@ -571,6 +748,25 @@ def draw_prediction_map(image_path: Path, evaluation: dict[str, Any], out_path: 
     return out_path
 
 
+def draw_candidate_preview_map(
+    image_path: Path, predictions: list[dict[str, Any]], out_path: Path
+) -> Path:
+    image = Image.open(image_path).convert("RGBA")
+    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    font = ImageFont.load_default()
+    color = (30, 110, 220, 230)
+    for marker, prediction in enumerate(predictions, start=1):
+        point = prediction.get("click_point")
+        if not point:
+            continue
+        draw_crosshair(draw, point["x"], point["y"], color)
+        draw_label(draw, font, str(marker), point["x"] + 12, point["y"] - 12, fill=color)
+    result = Image.alpha_composite(image, overlay).convert("RGB")
+    result.save(out_path, format="PNG")
+    return out_path
+
+
 def draw_bbox(
     draw: ImageDraw.ImageDraw,
     bbox: dict[str, Any],
@@ -609,10 +805,20 @@ def draw_label(
 def write_html(report: dict[str, Any], json_path: Path) -> None:
     direct_summary = report["direct"]["evaluation"]["summary"]
     grid_summary = report["canpgrid"]["evaluation"]["summary"]
-    rows = render_error_rows(report["canpgrid"]["evaluation"]["rows"])
+    react = report.get("canpgrid_react")
+    react_summary = react["evaluation"]["summary"] if react else None
+    rows = render_error_rows((react or report["canpgrid"])["evaluation"]["rows"])
     canpgrid_map = html.escape(relative_asset(report["canpgrid"]["prediction_map"]))
+    react_map = html.escape(relative_asset(react["prediction_map"])) if react else ""
+    react_preview = render_react_preview_figure(react)
+    react_summary_row = (
+        render_summary_row("CanpGrid + ReAct 自检", react_summary, react["usage"])
+        if react and react_summary
+        else ""
+    )
     raw_direct = html.escape(report["direct"]["raw"]["content"])
     raw_grid = html.escape(report["canpgrid"]["raw"]["content"])
+    raw_react = render_react_raw(react)
     document = f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -640,7 +846,7 @@ def write_html(report: dict[str, Any], json_path: Path) -> None:
     .muted {{ color: #667085; }}
     .grid {{
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       gap: 14px;
     }}
     figure {{ margin: 0; }}
@@ -689,7 +895,8 @@ def write_html(report: dict[str, Any], json_path: Path) -> None:
         </thead>
         <tbody>
           {render_summary_row("不用 CanpGrid", direct_summary, report["direct"]["usage"])}
-          {render_summary_row("使用 CanpGrid", grid_summary, report["canpgrid"]["usage"])}
+          {render_summary_row("CanpGrid 单次识别", grid_summary, report["canpgrid"]["usage"])}
+          {react_summary_row}
         </tbody>
       </table>
     </section>
@@ -710,12 +917,17 @@ def write_html(report: dict[str, Any], json_path: Path) -> None:
         </figure>
         <figure>
           <img src="{canpgrid_map}" alt="canpgrid">
-          <figcaption>使用 CanpGrid 的点击点预测与错误。</figcaption>
+          <figcaption>CanpGrid 单次识别的点击点预测与错误。</figcaption>
+        </figure>
+        {react_preview}
+        <figure>
+          <img src="{react_map}" alt="canpgrid react">
+          <figcaption>CanpGrid + ReAct 自检后的最终点击点。</figcaption>
         </figure>
       </div>
     </section>
     <section>
-      <h2>CanpGrid 错误分类</h2>
+      <h2>最终错误分类</h2>
       <table>
         <thead>
           <tr><th>类别</th><th>问题类型</th><th>真值</th><th>预测</th><th>说明</th></tr>
@@ -727,12 +939,40 @@ def write_html(report: dict[str, Any], json_path: Path) -> None:
       <h2>原始模型返回</h2>
       <pre>{raw_direct}</pre>
       <pre>{raw_grid}</pre>
+      {raw_react}
     </section>
   </main>
 </body>
 </html>
 """
     HTML_PATH.write_text(document, encoding="utf-8")
+
+
+def render_react_preview_figure(react: dict[str, Any] | None) -> str:
+    if not react:
+        return ""
+    rounds = react.get("rounds") or []
+    if not rounds:
+        return ""
+    preview = rounds[-1].get("candidate_preview_map")
+    if not preview:
+        return ""
+    return f"""
+        <figure>
+          <img src="{html.escape(relative_asset(preview))}" alt="react candidate preview">
+          <figcaption>ReAct 自检前看到的候选点预览。</figcaption>
+        </figure>
+"""
+
+
+def render_react_raw(react: dict[str, Any] | None) -> str:
+    if not react:
+        return ""
+    blocks = []
+    for result in react.get("rounds", []):
+        raw = (result.get("raw") or {}).get("content", "")
+        blocks.append(f"<pre>{html.escape(raw)}</pre>")
+    return "\n".join(blocks)
 
 
 def render_summary_row(label: str, summary: dict[str, Any], usage: dict[str, Any] | None) -> str:
