@@ -273,6 +273,22 @@ real Kimi API calls; if `MOONSHOT_API_KEY` is missing, it fails instead of
 generating an offline model-test report. It compares direct model coordinates
 against the two-step CanpGrid cell-ruler workflow and records token usage.
 
+## Task Action Benchmark
+
+```bash
+python examples/task_action_benchmark.py \
+  --chat-image path/to/wechat-chat-list.jpg \
+  --contacts-image path/to/wechat-contacts.jpg \
+  --providers kimi,mimo \
+  --out-dir outputs/task_action_benchmark_wechat
+```
+
+This generates a goal-conditioned benchmark report. Each sample is a UI
+screenshot plus a user request such as "search for someone", "add a friend", or
+"send hello to this contact". The model must return exactly one next click
+focus point for the current screen. Human target rectangles are used only for
+scoring; CanpGrid still does not execute clicks.
+
 ## Interaction Dataset Workbench
 
 Open `tools/annotation_workbench.html` in a browser to create manual clickable
