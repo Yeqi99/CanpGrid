@@ -18,79 +18,235 @@ if str(ROOT) not in sys.path:
 
 from canpgrid import create_grid_view, resolve_point, resolve_region, zoom_region
 
-from demo import ensure_sample_image
-
-SAMPLE = ROOT / "examples" / "sample_images" / "sample.png"
 REPORT_DIR = ROOT / "outputs" / "codex_baseline_report"
 ASSET_DIR = REPORT_DIR / "assets"
 HTML_PATH = REPORT_DIR / "index.html"
+SOURCE_IMAGE = ASSET_DIR / "automation_settings_source.png"
 
-GLOBAL_GRID = [12, 7]
+GLOBAL_GRID = [12, 8]
 LOCAL_GRID = [8, 6]
 FINAL_GRID = [8, 8]
 RULER_SIZE = [16, 16]
+CANVAS_SIZE = (1440, 900)
 
 
 @dataclass(frozen=True)
-class PartCase:
+class ActionTarget:
+    step: int
     name: str
+    control_type: str
+    intent: str
     note: str
     target_point: tuple[float, float]
 
 
-PARTS = [
-    PartCase("A", "left upper blue panel", (250, 220)),
-    PartCase("B", "large center green panel", (645, 310)),
-    PartCase("C", "right upper orange panel", (1025, 210)),
-    PartCase("D", "left lower violet panel", (250, 500)),
-    PartCase("E", "right lower pink panel", (1020, 490)),
+ACTION_TARGETS = [
+    ActionTarget(
+        1,
+        "Enable automation",
+        "checkbox",
+        "Turn on scheduled report automation",
+        "Click the empty checkbox beside Enable automation.",
+        (358, 251),
+    ),
+    ActionTarget(
+        2,
+        "Workspace name",
+        "text field",
+        "Focus the workspace name field",
+        "Click inside the text field before replacing the value.",
+        (537, 336),
+    ),
+    ActionTarget(
+        3,
+        "Recipient email",
+        "text field",
+        "Focus the recipient email field",
+        "Click inside the recipient input where an email would be typed.",
+        (547, 434),
+    ),
+    ActionTarget(
+        4,
+        "Include summary",
+        "checkbox",
+        "Include generated summary in the report",
+        "Click the unchecked summary option.",
+        (358, 580),
+    ),
+    ActionTarget(
+        5,
+        "Run preview",
+        "secondary button",
+        "Preview the automation before saving",
+        "Click the secondary preview button.",
+        (1048, 732),
+    ),
+    ActionTarget(
+        6,
+        "Save automation",
+        "primary button",
+        "Save the configured automation",
+        "Click the primary save button.",
+        (1233, 732),
+    ),
 ]
 
 
 def main() -> None:
-    ensure_sample_image(SAMPLE)
     if REPORT_DIR.exists():
         shutil.rmtree(REPORT_DIR)
     ASSET_DIR.mkdir(parents=True, exist_ok=True)
-
-    source_copy = ASSET_DIR / "source.png"
-    shutil.copyfile(SAMPLE, source_copy)
+    create_action_sample_image(SOURCE_IMAGE)
 
     overview = create_grid_view(
-        SAMPLE,
+        SOURCE_IMAGE,
         grid_size=GLOBAL_GRID,
         overlay_mode="grid",
         detail_mode="medium",
         out_dir=ASSET_DIR,
     )
 
-    traces = [build_part_trace(part) for part in PARTS]
-    marker_map = draw_marker_map(source_copy, traces, ASSET_DIR / "resolved_points.png")
-    write_html(source_copy, marker_map, overview, traces)
+    traces = [build_action_trace(target) for target in ACTION_TARGETS]
+    marker_map = draw_marker_map(SOURCE_IMAGE, traces, ASSET_DIR / "resolved_action_points.png")
+    write_html(SOURCE_IMAGE, marker_map, overview, traces)
 
     print(
         json.dumps(
-            {"html_report": str(HTML_PATH), "parts": traces},
+            {"html_report": str(HTML_PATH), "action_trace": traces},
             ensure_ascii=False,
             indent=2,
         )
     )
 
 
-def build_part_trace(part: PartCase) -> dict[str, Any]:
-    with Image.open(SAMPLE) as image:
+def create_action_sample_image(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image = Image.new("RGB", CANVAS_SIZE, "#f5f7fb")
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+
+    draw.rectangle((0, 0, 1440, 72), fill="#111827")
+    draw.text((34, 26), "CanpGrid Automation Console", fill="#ffffff", font=font)
+    draw.text((1180, 26), "Preview mode", fill="#d1d5db", font=font)
+
+    draw.rectangle((0, 72, 260, 900), fill="#ffffff")
+    nav_items = [
+        ("Overview", 132, False),
+        ("Visual reports", 184, False),
+        ("Automation", 236, True),
+        ("Calibration", 288, False),
+        ("Settings", 340, False),
+    ]
+    for label, y, active in nav_items:
+        fill = "#e8f5fb" if active else "#ffffff"
+        outline = "#0f8fb3" if active else "#ffffff"
+        draw.rounded_rectangle((28, y - 20, 230, y + 20), radius=8, fill=fill, outline=outline)
+        draw.text((50, y - 6), label, fill="#172033", font=font)
+
+    draw.rounded_rectangle((310, 120, 1360, 820), radius=10, fill="#ffffff", outline="#d7dce8")
+    draw.text((346, 158), "Automation Settings", fill="#172033", font=font)
+    draw.text(
+        (346, 184),
+        "Configure an observation report workflow. This is a drawn sample UI.",
+        fill="#667085",
+        font=font,
+    )
+
+    draw_section(draw, font, "Schedule", 346, 232)
+    draw_checkbox(draw, font, (346, 239), "Enable automation", checked=False)
+    draw_field(draw, font, (346, 300, 820, 372), "Workspace name", "CanpGrid nightly report")
+    draw_field(draw, font, (346, 412, 820, 484), "Recipient email", "agent-review@example.com")
+
+    draw_section(draw, font, "Report content", 346, 534)
+    draw_checkbox(draw, font, (346, 568), "Include summary", checked=False)
+    draw_checkbox(draw, font, (346, 621), "Attach annotated images", checked=True)
+    draw_checkbox(draw, font, (346, 674), "Export machine-readable trace", checked=True)
+
+    draw_section(draw, font, "Delivery", 910, 232)
+    draw_dropdown(draw, font, (910, 295, 1280, 377), "Cadence", "Every weekday at 09:00")
+    draw_dropdown(draw, font, (910, 393, 1280, 475), "Overlay preset", "Hybrid, 16x16 ruler")
+    draw_preview_panel(draw, font)
+
+    draw.rounded_rectangle(
+        (938, 700, 1156, 766), radius=8, fill="#ffffff", outline="#0f8fb3", width=2
+    )
+    draw.text((1010, 727), "Run preview", fill="#0f6680", font=font)
+    draw.rounded_rectangle((1174, 700, 1328, 766), radius=8, fill="#0f8fb3", outline="#0f8fb3")
+    draw.text((1210, 727), "Save automation", fill="#ffffff", font=font)
+
+    image.save(path, format="PNG")
+
+
+def draw_section(
+    draw: ImageDraw.ImageDraw, font: ImageFont.ImageFont, text: str, x: int, y: int
+) -> None:
+    draw.text((x, y), text, fill="#344054", font=font)
+    draw.line((x, y + 24, x + 430, y + 24), fill="#e4e7ec", width=1)
+
+
+def draw_checkbox(
+    draw: ImageDraw.ImageDraw,
+    font: ImageFont.ImageFont,
+    origin: tuple[int, int],
+    label: str,
+    *,
+    checked: bool,
+) -> None:
+    x, y = origin
+    draw.rounded_rectangle(
+        (x, y, x + 24, y + 24), radius=4, fill="#ffffff", outline="#667085", width=2
+    )
+    if checked:
+        draw.line((x + 5, y + 13, x + 10, y + 18, x + 19, y + 7), fill="#0f8fb3", width=3)
+    draw.text((x + 38, y + 6), label, fill="#182033", font=font)
+
+
+def draw_field(
+    draw: ImageDraw.ImageDraw,
+    font: ImageFont.ImageFont,
+    box: tuple[int, int, int, int],
+    label: str,
+    value: str,
+) -> None:
+    x1, y1, x2, y2 = box
+    draw.text((x1, y1 - 22), label, fill="#344054", font=font)
+    draw.rounded_rectangle(box, radius=8, fill="#ffffff", outline="#98a2b3", width=2)
+    draw.text((x1 + 18, y1 + 31), value, fill="#182033", font=font)
+
+
+def draw_dropdown(
+    draw: ImageDraw.ImageDraw,
+    font: ImageFont.ImageFont,
+    box: tuple[int, int, int, int],
+    label: str,
+    value: str,
+) -> None:
+    x1, y1, x2, y2 = box
+    draw_field(draw, font, box, label, value)
+    draw.polygon([(x2 - 32, y1 + 34), (x2 - 18, y1 + 34), (x2 - 25, y1 + 44)], fill="#667085")
+
+
+def draw_preview_panel(draw: ImageDraw.ImageDraw, font: ImageFont.ImageFont) -> None:
+    draw.rounded_rectangle((910, 530, 1280, 642), radius=8, fill="#f8fbfd", outline="#d7dce8")
+    draw.text((934, 558), "Preview target", fill="#344054", font=font)
+    draw.text((934, 586), "5 image observations, hybrid overlay", fill="#667085", font=font)
+    draw.text((934, 614), "Estimated trace confidence: baseline", fill="#667085", font=font)
+
+
+def build_action_trace(target: ActionTarget) -> dict[str, Any]:
+    with Image.open(SOURCE_IMAGE) as image:
         image_size = image.size
 
     first_cell = cell_for_point(
-        part.target_point,
+        target.target_point,
         {"x1": 0, "y1": 0, "x2": image_size[0], "y2": image_size[1]},
         GLOBAL_GRID,
     )
     first_level = {"grid_size": GLOBAL_GRID, "cell": first_cell}
-    first_region = resolve_region(SAMPLE, [first_level])
+    first_region = resolve_region(SOURCE_IMAGE, [first_level])
 
     rough_view = zoom_region(
-        SAMPLE,
+        SOURCE_IMAGE,
         [first_level],
         next_grid_size=LOCAL_GRID,
         overlay_mode="grid",
@@ -99,31 +255,34 @@ def build_part_trace(part: PartCase) -> dict[str, Any]:
         out_dir=ASSET_DIR,
     )
 
-    second_cell = cell_for_point(part.target_point, first_region["bbox_on_original"], LOCAL_GRID)
+    second_cell = cell_for_point(target.target_point, first_region["bbox_on_original"], LOCAL_GRID)
     second_level = {"grid_size": LOCAL_GRID, "cell": second_cell}
     levels = [first_level, second_level]
-    final_region = resolve_region(SAMPLE, levels)
-    point_spec = ruler_point_for_target(part.target_point, final_region["bbox_on_original"])
+    final_region = resolve_region(SOURCE_IMAGE, levels)
+    point_spec = ruler_point_for_target(target.target_point, final_region["bbox_on_original"])
 
     final_view = zoom_region(
-        SAMPLE,
+        SOURCE_IMAGE,
         levels,
         next_grid_size=FINAL_GRID,
         overlay_mode="hybrid",
         detail_mode="fine",
         ruler_config={"tick_x": RULER_SIZE[0], "tick_y": RULER_SIZE[1]},
-        zoom_factor=20,
+        zoom_factor=18,
         out_dir=ASSET_DIR,
     )
 
-    point_result = resolve_point(SAMPLE, levels, point_spec)
+    point_result = resolve_point(SOURCE_IMAGE, levels, point_spec)
     resolved_point = point_result["point_on_original"]
-    error_px = math.dist(part.target_point, resolved_point)
+    error_px = math.dist(target.target_point, resolved_point)
 
     return {
-        "name": part.name,
-        "note": part.note,
-        "target_point": list(part.target_point),
+        "step": target.step,
+        "name": target.name,
+        "control_type": target.control_type,
+        "intent": target.intent,
+        "note": target.note,
+        "target_point": list(target.target_point),
         "levels": levels,
         "rough_view": relative_asset(rough_view["annotated_image_path"]),
         "final_view": relative_asset(final_view["annotated_image_path"]),
@@ -175,13 +334,13 @@ def draw_marker_map(source_path: Path, traces: list[dict[str, Any]], out_path: P
 
     for trace in traces:
         x, y = trace["resolved_point"]
-        name = trace["name"]
-        color = (255, 55, 55, 230)
-        draw.ellipse((x - 10, y - 10, x + 10, y + 10), outline=color, width=3)
-        draw.line((x - 18, y, x + 18, y), fill=color, width=2)
-        draw.line((x, y - 18, x, y + 18), fill=color, width=2)
-        draw.rectangle((x + 12, y - 11, x + 46, y + 9), fill=(0, 0, 0, 170))
-        draw.text((x + 17, y - 8), name, fill=(255, 255, 255, 245), font=font)
+        step = trace["step"]
+        color = (219, 72, 65, 235)
+        draw.ellipse((x - 11, y - 11, x + 11, y + 11), outline=color, width=3)
+        draw.line((x - 20, y, x + 20, y), fill=color, width=2)
+        draw.line((x, y - 20, x, y + 20), fill=color, width=2)
+        draw.rounded_rectangle((x + 14, y - 14, x + 48, y + 12), radius=4, fill=(0, 0, 0, 180))
+        draw.text((x + 24, y - 8), str(step), fill=(255, 255, 255, 245), font=font)
 
     result = Image.alpha_composite(image, overlay).convert("RGB")
     result.save(out_path, format="PNG")
@@ -196,6 +355,7 @@ def write_html(
 ) -> None:
     package_version = current_version()
     trace_cards = "\n".join(render_trace_card(trace) for trace in traces)
+    action_summary = "\n".join(render_action_summary_item(trace) for trace in traces)
     data_json = html.escape(json.dumps(traces, ensure_ascii=False, indent=2))
     overview_src = relative_asset(overview["annotated_image_path"])
 
@@ -204,7 +364,7 @@ def write_html(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CanpGrid Codex Baseline Report</title>
+  <title>CanpGrid Codex UI Action Baseline</title>
   <style>
     :root {{
       color-scheme: light;
@@ -215,6 +375,7 @@ def write_html(
       --panel: #ffffff;
       --accent: #0f8fb3;
       --accent-2: #d94841;
+      --soft: #f8fbfd;
     }}
     * {{ box-sizing: border-box; }}
     body {{
@@ -225,15 +386,15 @@ def write_html(
         BlinkMacSystemFont, "Segoe UI", sans-serif;
       line-height: 1.5;
     }}
-    header, main {{ max-width: 1180px; margin: 0 auto; padding: 28px; }}
+    header, main {{ max-width: 1240px; margin: 0 auto; padding: 28px; }}
     header {{ padding-top: 36px; }}
     h1 {{ margin: 0 0 8px; font-size: 32px; line-height: 1.15; letter-spacing: 0; }}
     h2 {{ margin: 0 0 16px; font-size: 22px; letter-spacing: 0; }}
     h3 {{ margin: 0 0 12px; font-size: 18px; letter-spacing: 0; }}
     p {{ margin: 0 0 12px; }}
     code {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }}
-    .subtitle {{ color: var(--muted); font-size: 16px; max-width: 820px; }}
-    .meta {{
+    .subtitle {{ color: var(--muted); font-size: 16px; max-width: 900px; }}
+    .meta, .action-list {{
       display: flex;
       flex-wrap: wrap;
       gap: 10px;
@@ -282,9 +443,9 @@ def write_html(
     }}
     .step {{
       border-left: 3px solid var(--accent);
-      background: #f8fbfd;
+      background: var(--soft);
       padding: 10px;
-      min-height: 88px;
+      min-height: 96px;
     }}
     .step strong {{ display: block; font-size: 13px; margin-bottom: 4px; }}
     .step span {{ color: var(--muted); font-size: 13px; }}
@@ -302,6 +463,15 @@ def write_html(
     }}
     .metric b {{ display: block; font-size: 12px; color: var(--muted); font-weight: 600; }}
     .metric span {{ font-size: 15px; }}
+    .action-item {{
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--soft);
+      padding: 10px 12px;
+      min-width: 250px;
+    }}
+    .action-item b {{ display: block; font-size: 13px; }}
+    .action-item span {{ display: block; color: var(--muted); font-size: 13px; }}
     pre {{
       overflow: auto;
       background: #111827;
@@ -317,7 +487,7 @@ def write_html(
       color: #63312e;
       margin-top: 12px;
     }}
-    @media (max-width: 860px) {{
+    @media (max-width: 900px) {{
       header, main {{ padding: 18px; }}
       .grid, .steps, .metrics {{ grid-template-columns: 1fr; }}
       h1 {{ font-size: 26px; }}
@@ -326,50 +496,61 @@ def write_html(
 </head>
 <body>
   <header>
-    <h1>CanpGrid Codex Baseline Report</h1>
+    <h1>CanpGrid Codex UI Action Baseline</h1>
     <p class="subtitle">
-      这份报告用当前 Codex 作为“观察者基座”，把一张示例图片中各个视觉部件的候选点位定位过程可视化：
-      全图网格、局部放大、最终 ruler/hybrid 点位，以及解析回原图的坐标。
+      这份报告把一个更像真实界面的组合动作拆开：复选框、文本框和按钮。
+      当前 Codex 作为观察者基座，只负责给出每一步的候选图片坐标；
+      CanpGrid 负责把全图网格、局部放大和 ruler 点位解析成原图坐标。
     </p>
     <div class="meta">
       <span class="pill">CanpGrid {html.escape(package_version)}</span>
       <span class="pill">Global grid {GLOBAL_GRID[0]}x{GLOBAL_GRID[1]}</span>
       <span class="pill">Local grid {LOCAL_GRID[0]}x{LOCAL_GRID[1]}</span>
       <span class="pill">Ruler {RULER_SIZE[0]}x{RULER_SIZE[1]}</span>
-      <span class="pill">No real click execution</span>
+      <span class="pill">Candidate click positions only</span>
     </div>
   </header>
   <main>
     <section>
-      <h2>0. 原图与全局观察图</h2>
+      <h2>0. 组合动作</h2>
+      <p>
+        目标动作：打开自动报告，确认两个输入位置，勾选摘要，先预览，再保存。
+        报告只展示图片空间里的候选位置，不实际点击或输入。
+      </p>
+      <div class="action-list">
+        {action_summary}
+      </div>
+    </section>
+    <section>
+      <h2>1. 原始界面与全局观察图</h2>
       <div class="grid">
         <figure>
-          <img src="{relative_asset(source_copy)}" alt="source image">
-          <figcaption>原始示例图。部件 A-E 是人为绘制的视觉区域。</figcaption>
+          <img src="{relative_asset(source_copy)}" alt="source UI image">
+          <figcaption>自动生成的设置界面，包含复选框、文本框、下拉样式和按钮。</figcaption>
         </figure>
         <figure>
           <img src="{overview_src}" alt="global grid view">
-          <figcaption>第一层全图网格观察图。观察者先选包含目标部件的 cell。</figcaption>
+          <figcaption>第一层全图网格观察图。观察者先选包含当前目标控件的 cell。</figcaption>
         </figure>
       </div>
       <div class="callout">
-        CanpGrid Core 只处理图片空间引用。这里展示的是候选点位解析，
-        不做真实点击、不识别 UI 语义、不调用模型。
+        CanpGrid Core 仍然只处理图片观察和空间引用。这里没有真实点击、
+        没有 UI 自动化、没有 OCR、没有模型调用。
       </div>
     </section>
     <section>
-      <h2>1. 解析后的候选点位总览</h2>
+      <h2>2. 解析后的候选点位总览</h2>
       <figure>
-        <img src="{relative_asset(marker_map)}" alt="resolved point map">
-        <figcaption>红色十字是每个部件最终解析回原图的候选点位。</figcaption>
+        <img src="{relative_asset(marker_map)}" alt="resolved action point map">
+        <figcaption>红色编号十字是组合动作每一步解析回原图的候选点位。</figcaption>
       </figure>
     </section>
     <section>
-      <h2>2. 各部件定位过程</h2>
+      <h2>3. 每一步定位过程</h2>
       {trace_cards}
     </section>
     <section>
-      <h2>3. 机器可读 trace</h2>
+      <h2>4. 机器可读 trace</h2>
       <pre>{data_json}</pre>
     </section>
   </main>
@@ -377,6 +558,15 @@ def write_html(
 </html>
 """
     HTML_PATH.write_text(document, encoding="utf-8")
+
+
+def render_action_summary_item(trace: dict[str, Any]) -> str:
+    return f"""
+<div class="action-item">
+  <b>{trace["step"]}. {html.escape(trace["name"])}</b>
+  <span>{html.escape(trace["control_type"])} · {html.escape(trace["intent"])}</span>
+</div>
+"""
 
 
 def render_trace_card(trace: dict[str, Any]) -> str:
@@ -388,23 +578,26 @@ def render_trace_card(trace: dict[str, Any]) -> str:
 
     return f"""
 <div class="trace">
-  <h3>部件 {html.escape(trace["name"])} · {html.escape(trace["note"])}</h3>
+  <h3>Step {trace["step"]} · {html.escape(trace["name"])}
+    <span class="pill">{html.escape(trace["control_type"])}</span>
+  </h3>
+  <p>{html.escape(trace["note"])}</p>
   <div class="steps">
     <div class="step">
-      <strong>Step 1 · 全图粗选</strong>
+      <strong>1 · 全图粗选</strong>
       <span>选择 cell {trace["first_cell"]} @ {GLOBAL_GRID[0]}x{GLOBAL_GRID[1]}</span>
     </div>
     <div class="step">
-      <strong>Step 2 · 局部放大</strong>
+      <strong>2 · 局部放大</strong>
       <span>在局部图中选择 cell {trace["second_cell"]} @ {LOCAL_GRID[0]}x{LOCAL_GRID[1]}</span>
     </div>
     <div class="step">
-      <strong>Step 3 · 细定位</strong>
+      <strong>3 · 细定位</strong>
       <span>使用 ruler_point：{point_spec_json}</span>
     </div>
     <div class="step">
-      <strong>Step 4 · 回写原图</strong>
-      <span>得到原图候选点 {format_point(trace["resolved_point"])}</span>
+      <strong>4 · 回写原图</strong>
+      <span>得到候选点 {format_point(trace["resolved_point"])}</span>
     </div>
   </div>
   <div class="grid">
@@ -424,7 +617,7 @@ def render_trace_card(trace: dict[str, Any]) -> str:
     </figure>
   </div>
   <div class="metrics">
-    <div class="metric"><b>目标参考点</b><span>{format_point(trace["target_point"])}</span></div>
+    <div class="metric"><b>参考目标点</b><span>{format_point(trace["target_point"])}</span></div>
     <div class="metric"><b>解析候选点</b><span>{format_point(trace["resolved_point"])}</span></div>
     <div class="metric"><b>误差</b><span>{trace["error_px"]} px</span></div>
     <div class="metric"><b>最终 bbox</b><span><code>{final_region_json}</code></span></div>

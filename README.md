@@ -178,9 +178,10 @@ python examples/codex_baseline_report.py
 ```
 
 This generates `outputs/codex_baseline_report/index.html`, an HTML report that
-shows a Codex-baseline localization trace for multiple visual parts in one
-image. It is a progress artifact for release review; it does not execute real
-clicks or add UI automation to Core.
+shows a Codex-baseline localization trace for a small UI action scenario with
+checkboxes, text fields, and buttons. It is a progress artifact for release
+review; it identifies candidate image-space positions only and does not execute
+real clicks or add UI automation to Core.
 
 ## Tests
 

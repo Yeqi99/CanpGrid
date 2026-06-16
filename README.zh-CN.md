@@ -131,7 +131,8 @@ ruff check .
 
 Demo 输出保存在 `outputs/demo/`。
 Codex baseline 观察报告输出在 `outputs/codex_baseline_report/index.html`，
-用于查看一张图片里多个视觉部件从全图网格、局部放大到候选点位解析的全过程。
+用于查看一个包含复选框、文本框和按钮的小型 UI 组合动作如何从全图网格、
+局部放大一路解析到候选点位。
 
 ## 许可证
 
