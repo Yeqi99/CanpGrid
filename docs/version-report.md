@@ -62,6 +62,7 @@ For each future version, regenerate this report after tests pass and inspect:
 - Whether the chosen `levels` are easy to audit.
 - Whether final point specs are readable.
 - Whether preview images make the final focus easy to confirm.
+- Whether local and original-image previews are both available when zoom hides context.
 - Whether resolved candidate points land where expected.
 - Whether a multi-step UI-like action is easy to audit.
 - Whether the report makes version progress clear to a human reviewer.

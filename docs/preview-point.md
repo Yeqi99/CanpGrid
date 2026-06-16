@@ -33,6 +33,23 @@ preview = preview_point(
 - `with_inset`: add a local magnified inset.
 - `out_dir`: preview output directory.
 
+## Preview targets
+
+`preview_on` controls where the candidate point is drawn:
+
+- `current_view`: mark the point on the final cropped/zoomed observation view.
+  This is best for checking fine placement.
+- `original_image`: mark the same point on the full original image. This is best
+  for checking global context when the local view is zoomed in too far.
+- `both`: generate both images. This is the recommended self-check mode for UI
+  work because it answers two different questions: "is the focus precise?" and
+  "is it on the intended control?".
+
+When the original-image preview is meant to preserve global context, prefer
+`marker_style="ring_crosshair"` without an inset. Use `ring_crosshair_inset`
+mainly on local/current views where the magnified patch helps inspect small
+details.
+
 ## Output
 
 ```json

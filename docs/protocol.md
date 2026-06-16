@@ -52,3 +52,6 @@ final focus before deciding whether to confirm, adjust, or relocalize.
 Preview does not execute a click. It only marks the candidate point on the
 current local view, the original image, or both.
 
+For deeply zoomed views, prefer `preview_on="both"`. The local preview checks
+fine placement, while the original-image preview shows whether the candidate
+point belongs to the intended global UI element.

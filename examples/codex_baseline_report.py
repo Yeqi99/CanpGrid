@@ -278,12 +278,21 @@ def build_action_trace(target: ActionTarget) -> dict[str, Any]:
     )
 
     point_result = resolve_point(SOURCE_IMAGE, levels, point_spec)
-    preview_result = preview_point(
+    local_preview_result = preview_point(
         SOURCE_IMAGE,
         levels,
         point_spec,
-        preview_on="both",
+        preview_on="current_view",
         marker_style="ring_crosshair_inset",
+        out_dir=ASSET_DIR,
+        zoom_factor=18,
+    )
+    global_preview_result = preview_point(
+        SOURCE_IMAGE,
+        levels,
+        point_spec,
+        preview_on="original_image",
+        marker_style="ring_crosshair",
         out_dir=ASSET_DIR,
         zoom_factor=18,
     )
@@ -300,14 +309,12 @@ def build_action_trace(target: ActionTarget) -> dict[str, Any]:
         "levels": levels,
         "rough_view": relative_asset(rough_view["annotated_image_path"]),
         "final_view": relative_asset(final_view["annotated_image_path"]),
-        "preview_view": relative_asset(preview_result["preview_image_path"]),
-        "preview_original_view": relative_asset(
-            preview_result["preview_image_paths"]["original_image"]
-        ),
+        "preview_view": relative_asset(local_preview_result["preview_image_path"]),
+        "preview_original_view": relative_asset(global_preview_result["preview_image_path"]),
         "final_region": final_region,
         "point_spec": point_spec,
         "resolved_point": resolved_point,
-        "point_on_current_view": preview_result["point_on_current_view"],
+        "point_on_current_view": local_preview_result["point_on_current_view"],
         "error_px": round(error_px, 2),
         "first_cell": first_cell,
         "second_cell": second_cell,
@@ -442,7 +449,7 @@ def write_html(
       gap: 16px;
     }}
     .trace-images {{
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
     }}
     figure {{ margin: 0; }}
     img {{
@@ -541,7 +548,8 @@ def write_html(
       <p>
         目标动作：打开自动报告，确认两个输入位置，勾选摘要，先预览，再保存。
         报告只展示图片空间里的候选位置，不实际点击或输入。每一步都先生成
-        preview image，用来做视觉自检，再决定 confirm / adjust / relocalize。
+        preview image，用来做视觉自检，再决定 confirm / adjust / relocalize；
+        局部 preview 看精度，全局 preview 看上下文。
       </p>
       <div class="action-list">
         {action_summary}
@@ -577,6 +585,11 @@ def write_html(
     </section>
     <section>
       <h2>4. 每一步定位与预览</h2>
+      <p>
+        每一步都展示两种候选点预览：current_view 是最终局部视野里的精确焦点，
+        original_image 是原图全局上下文里的同一个候选焦点。缩放过大时，先看
+        original_image 确认位置属于正确控件，再看 current_view 微调。
+      </p>
       {trace_cards}
     </section>
     <section>
@@ -699,9 +712,16 @@ def render_trace_card(trace: dict[str, Any]) -> str:
     <figure>
       <img
         src="{html.escape(trace["preview_view"])}"
-        alt="candidate focus preview for {html.escape(trace["name"])}"
+        alt="local candidate focus preview for {html.escape(trace["name"])}"
       >
-      <figcaption>preview_point 生成的候选焦点预览图，用于自检。</figcaption>
+      <figcaption>局部 preview：放大视野内的候选焦点，用于确认精度。</figcaption>
+    </figure>
+    <figure>
+      <img
+        src="{html.escape(trace["preview_original_view"])}"
+        alt="global candidate focus preview for {html.escape(trace["name"])}"
+      >
+      <figcaption>全局 preview：原图上下文中的同一候选点，用于确认控件归属。</figcaption>
     </figure>
   </div>
   <div class="metrics">

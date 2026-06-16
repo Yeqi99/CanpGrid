@@ -101,7 +101,9 @@ preview = preview_point(
 `create_grid_view` and `zoom_region` always return an `annotated_image_path`.
 The bbox metadata is companion data, not the main output.
 `preview_point` creates a non-executing focus preview so an agent can inspect a
-candidate point before confirming or adjusting it.
+candidate point before confirming or adjusting it. Use `preview_on="both"` when
+the local view is highly zoomed: the current-view preview checks precision, and
+the original-image preview keeps the global UI context visible.
 
 ## CLI
 

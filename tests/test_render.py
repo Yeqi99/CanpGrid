@@ -45,6 +45,19 @@ def test_preview_point_current_and_both(tmp_path: Path) -> None:
     assert current["point_on_original"] == [120, 75]
     assert "point_on_current_view" in current
 
+    original = preview_point(
+        image_path,
+        levels,
+        point_spec,
+        preview_on="original_image",
+        out_dir=tmp_path / "original",
+    )
+    original_path = Path(original["preview_image_path"])
+    assert original_path.exists()
+    assert original["point_on_original"] == [120, 75]
+    assert "point_on_current_view" in original
+    assert "preview_image_paths" not in original
+
     both = preview_point(
         image_path,
         levels,

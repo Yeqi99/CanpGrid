@@ -86,6 +86,8 @@ preview = preview_point(
 
 `create_grid_view` 和 `zoom_region` 默认都会生成 `annotated_image_path`。原图 bbox 是配套元数据，不是主要产物。
 `preview_point` 会生成不执行点击的候选焦点预览图，让智能体先看一眼这个点是否正确。
+当局部图缩放很大时，建议使用 `preview_on="both"`：current_view 看精度，
+original_image 看全局控件归属。
 
 ## CLI 示例
 
