@@ -73,6 +73,31 @@ def test_resolve_point_rejects_unknown_point_spec() -> None:
         )
 
 
+def test_resolve_cell_ruler_point() -> None:
+    result = resolve_point(
+        image_size=(900, 2000),
+        levels=[],
+        point_spec={
+            "type": "cell_ruler_point",
+            "grid_size": [9, 20],
+            "cell": [7, 1],
+            "x": 5,
+            "y": 4,
+            "ruler_size": [10, 10],
+        },
+    )
+
+    assert result["point_on_original"] == [750, 140]
+    assert result["final_region_bbox_on_original"] == {
+        "x1": 700,
+        "y1": 100,
+        "x2": 800,
+        "y2": 200,
+        "width": 100,
+        "height": 100,
+    }
+
+
 def test_preview_point_rejects_unknown_marker_style(tmp_path) -> None:
     image_path = tmp_path / "sample.png"
 

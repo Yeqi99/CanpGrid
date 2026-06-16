@@ -6,10 +6,11 @@ from math import ceil, floor
 from pathlib import Path
 from typing import Any
 
-from .geometry import resolve_levels_to_bbox, resolve_point_in_bbox
+from .geometry import resolve_levels_to_bbox, resolve_point_in_bbox, resolve_point_region_in_bbox
 from .grid import suggest_grid_size, validate_grid_size
 from .render import (
     crop_and_zoom,
+    draw_cell_ruler_overlay,
     draw_overlay,
     draw_point_preview,
     load_image,
@@ -17,6 +18,7 @@ from .render import (
 )
 from .schemas import (
     BBox,
+    CellRulerViewResult,
     DetailMode,
     GridViewResult,
     Level,
@@ -130,6 +132,65 @@ def zoom_region(
     return result.to_dict()
 
 
+def create_cell_ruler_view(
+    image_path: str | Path,
+    levels: Sequence[Mapping[str, Any] | Level] | None = None,
+    *,
+    grid_size: Sequence[int],
+    cell: Sequence[int],
+    detail_mode: DetailMode = "medium",
+    ruler_config: Mapping[str, Any] | RulerConfig | None = None,
+    zoom_factor: float = 1,
+    show_axis_ticks: bool = True,
+    out_dir: str | Path = "outputs",
+) -> dict[str, Any]:
+    if zoom_factor <= 0:
+        raise ValueError("zoom_factor must be > 0")
+    original = load_image(image_path)
+    resolved_levels = coerce_levels(levels)
+    base_bbox = resolve_levels_to_bbox((original.width, original.height), resolved_levels)
+    current_view = crop_and_zoom(original, base_bbox, zoom_factor=zoom_factor)
+    resolved_grid_size = validate_grid_size(grid_size)
+    cell_tuple = _validate_cell(cell, resolved_grid_size)
+    if isinstance(ruler_config, RulerConfig):
+        resolved_ruler = ruler_config
+    else:
+        resolved_ruler = RulerConfig.from_mapping(ruler_config)
+    selected_level = Level(grid_size=resolved_grid_size, cell=cell_tuple)
+    cell_bbox = resolve_levels_to_bbox(
+        (original.width, original.height), (*resolved_levels, selected_level)
+    )
+    view_id = _view_id()
+    annotated = draw_cell_ruler_overlay(
+        current_view,
+        resolved_grid_size,
+        cell_tuple,
+        detail_mode=detail_mode,
+        ruler_config=resolved_ruler,
+        show_axis_ticks=show_axis_ticks,
+        level_label=f"level {len(resolved_levels)} cell ruler",
+        path_label=_path_label((*resolved_levels, selected_level)),
+    )
+    annotated_path = save_png(
+        annotated,
+        Path(out_dir) / f"{view_id}_level{len(resolved_levels)}_cell_ruler.png",
+    )
+    result = CellRulerViewResult(
+        view_id=view_id,
+        image_width=original.width,
+        image_height=original.height,
+        level=len(resolved_levels),
+        grid_size=resolved_grid_size,
+        cell=cell_tuple,
+        ruler_config=resolved_ruler,
+        bbox_on_original=base_bbox,
+        cell_bbox_on_original=cell_bbox,
+        annotated_image_path=annotated_path,
+        levels=resolved_levels,
+    )
+    return result.to_dict()
+
+
 def resolve_region(
     image_path: str | Path | None = None,
     levels: Sequence[Mapping[str, Any] | Level] | None = None,
@@ -153,7 +214,10 @@ def resolve_point(
     size = _resolve_image_size(image_path, image_size)
     bbox = resolve_levels_to_bbox(size, levels)
     point = resolve_point_in_bbox(bbox, point_spec)
-    return PointResult(point_on_original=point, final_region_bbox_on_original=bbox).to_dict()
+    point_region = resolve_point_region_in_bbox(bbox, point_spec)
+    return PointResult(
+        point_on_original=point, final_region_bbox_on_original=point_region
+    ).to_dict()
 
 
 def preview_point(
@@ -178,6 +242,7 @@ def preview_point(
     resolved_levels = coerce_levels(levels)
     bbox = resolve_levels_to_bbox((original.width, original.height), resolved_levels)
     point_on_original = resolve_point_in_bbox(bbox, point_spec)
+    point_region = resolve_point_region_in_bbox(bbox, point_spec)
     view_id = _view_id()
     out_path = Path(out_dir)
 
@@ -214,7 +279,7 @@ def preview_point(
         preview_image_path=preview_paths[main_key],
         point_on_original=point_on_original,
         point_on_current_view=point_on_current_view,
-        final_region_bbox_on_original=bbox,
+        final_region_bbox_on_original=point_region,
         preview_image_paths=preview_paths if preview_on == "both" else None,
     )
     return result.to_dict()
@@ -241,6 +306,20 @@ def _grid_for_canvas(
         suggested = suggest_grid_size(width, height, density)
         return suggested[0], suggested[1]
     return validate_grid_size(grid_size)
+
+
+def _validate_cell(cell: Sequence[int], grid_size: tuple[int, int]) -> tuple[int, int]:
+    if isinstance(cell, (str, bytes)) or len(cell) != 2:
+        raise ValueError("cell must be a two-item sequence")
+    cell_x, cell_y = cell
+    if not isinstance(cell_x, int) or isinstance(cell_x, bool):
+        raise ValueError("cell[0] must be an integer")
+    if not isinstance(cell_y, int) or isinstance(cell_y, bool):
+        raise ValueError("cell[1] must be an integer")
+    cols, rows = grid_size
+    if cell_x < 0 or cell_x >= cols or cell_y < 0 or cell_y >= rows:
+        raise ValueError("cell must be inside grid_size")
+    return cell_x, cell_y
 
 
 def _view_id() -> str:

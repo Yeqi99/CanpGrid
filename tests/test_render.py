@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from canpgrid import create_grid_view, preview_point
+from canpgrid import create_cell_ruler_view, create_grid_view, preview_point
 
 
 def test_render_smoke_grid_ruler_hybrid(tmp_path: Path) -> None:
@@ -69,3 +69,31 @@ def test_preview_point_current_and_both(tmp_path: Path) -> None:
     paths = both["preview_image_paths"]
     assert Path(paths["current_view"]).exists()
     assert Path(paths["original_image"]).exists()
+
+
+def test_create_cell_ruler_view(tmp_path: Path) -> None:
+    image_path = tmp_path / "sample.png"
+    Image.new("RGB", (900, 2000), "#f4f6fb").save(image_path)
+
+    result = create_cell_ruler_view(
+        image_path,
+        grid_size=[9, 20],
+        cell=[7, 1],
+        ruler_config={"tick_x": 10, "tick_y": 10},
+        zoom_factor=2,
+        out_dir=tmp_path / "cell-ruler",
+    )
+
+    annotated = Path(result["annotated_image_path"])
+    assert annotated.exists()
+    assert result["cell_bbox_on_original"] == {
+        "x1": 700,
+        "y1": 100,
+        "x2": 800,
+        "y2": 200,
+        "width": 100,
+        "height": 100,
+    }
+    assert result["point_spec_template"]["type"] == "cell_ruler_point"
+    with Image.open(annotated) as generated:
+        assert generated.size == (1800, 4000)

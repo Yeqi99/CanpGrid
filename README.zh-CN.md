@@ -43,7 +43,14 @@ python -m pip install -e ".[dev]"
 ## Python API 示例
 
 ```python
-from canpgrid import create_grid_view, preview_point, resolve_point, resolve_region, zoom_region
+from canpgrid import (
+    create_cell_ruler_view,
+    create_grid_view,
+    preview_point,
+    resolve_point,
+    resolve_region,
+    zoom_region,
+)
 
 view = create_grid_view(
     "examples/sample.png",
@@ -65,26 +72,51 @@ zoomed = zoom_region(
 
 region = resolve_region("examples/sample.png", levels)
 
+cell_ruler = create_cell_ruler_view(
+    "examples/sample.png",
+    levels,
+    grid_size=[8, 6],
+    cell=[3, 4],
+    ruler_config={"tick_x": 10, "tick_y": 10},
+    zoom_factor=4,
+    out_dir="outputs",
+)
+
 point = resolve_point(
     "examples/sample.png",
     levels,
     {
-        "type": "normalized_point",
-        "value": ["1/2", "1/2"],
+        "type": "cell_ruler_point",
+        "grid_size": [8, 6],
+        "cell": [3, 4],
+        "x": 3,
+        "y": 6,
+        "ruler_size": [10, 10],
     },
 )
 
 preview = preview_point(
     "examples/sample.png",
     levels,
-    {"type": "normalized_point", "value": ["1/2", "1/2"]},
+    {
+        "type": "cell_ruler_point",
+        "grid_size": [8, 6],
+        "cell": [3, 4],
+        "x": 3,
+        "y": 6,
+        "ruler_size": [10, 10],
+    },
     preview_on="both",
     marker_style="ring_crosshair_inset",
     out_dir="outputs",
 )
 ```
 
-`create_grid_view` 和 `zoom_region` 默认都会生成 `annotated_image_path`。原图 bbox 是配套元数据，不是主要产物。
+`create_grid_view`、`zoom_region` 和 `create_cell_ruler_view` 默认都会生成
+`annotated_image_path`。原图 bbox 是配套元数据，不是主要产物。
+`create_cell_ruler_view` 会高亮一个已选 grid cell，并在这个 cell 内画更细
+的尺子；模型可以回答“cell `[3, 4]` 的横 `3`、竖 `6`”，不用为了选点再多
+做一次递归放大。
 `preview_point` 会生成不执行点击的候选焦点预览图，让智能体先看一眼这个点是否正确。
 当局部图缩放很大时，建议使用 `preview_on="both"`：current_view 看精度，
 original_image 看全局控件归属。
@@ -97,8 +129,9 @@ canpgrid grid examples/sample.png --grid-size 12x7 --out outputs/
 canpgrid grid examples/sample.png --overlay-mode ruler --detail-mode fine --ruler-size 16x16 --out outputs/
 canpgrid zoom examples/sample.png --levels '[{"grid_size":[12,7],"cell":[6,2]}]' --out outputs/
 canpgrid zoom examples/sample.png --levels '[{"grid_size":[12,7],"cell":[6,2]}]' --overlay-mode hybrid --ruler-size 16x16 --out outputs/
+canpgrid cell-ruler examples/sample.png --levels '[{"grid_size":[12,7],"cell":[6,2]}]' --grid-size 8x6 --cell 3x4 --ruler-size 10x10 --zoom-factor 4 --out outputs/
 canpgrid resolve-region examples/sample.png --levels '[{"grid_size":[12,7],"cell":[6,2]},{"grid_size":[8,6],"cell":[3,4]}]'
-canpgrid resolve-point examples/sample.png --levels '[{"grid_size":[12,7],"cell":[6,2]}]' --point-spec '{"type":"hybrid_point","base":["1/2","1/2"],"offset":[2,3],"unit":"ruler_tick","ruler_size":[16,16]}'
+canpgrid resolve-point examples/sample.png --levels '[{"grid_size":[12,7],"cell":[6,2]}]' --point-spec '{"type":"cell_ruler_point","grid_size":[8,6],"cell":[3,4],"x":3,"y":6,"ruler_size":[10,10]}'
 canpgrid preview-point examples/sample.png --levels '[{"grid_size":[12,7],"cell":[6,2]}]' --point-spec '{"type":"normalized_point","value":["1/2","1/2"]}' --preview-on both --marker-style ring_crosshair_inset
 ```
 
@@ -126,6 +159,7 @@ canpgrid preview-point examples/sample.png --levels '[{"grid_size":[12,7],"cell"
 - `ruler_point`
 - `ruler_offset`
 - `hybrid_point`
+- `cell_ruler_point`
 - `subgrid_point`
 
 更多内容见 `docs/`。
@@ -139,6 +173,7 @@ Calibration 不属于 Core。未来可以比较不同模型在 none/grid/ruler/h
 ```bash
 python examples/demo.py
 python examples/codex_baseline_report.py
+python examples/kimi_wechat_dom_benchmark.py --skip-api
 pytest
 ruff check .
 ```
@@ -147,6 +182,10 @@ Demo 输出保存在 `outputs/demo/`。
 Codex baseline 观察报告输出在 `outputs/codex_baseline_report/index.html`，
 用于查看一个包含复选框、文本框和按钮的小型 UI 组合动作如何从全图网格、
 局部放大一路解析到候选点位。
+微信风格 DOM 基准输出在 `outputs/wechat_dom_benchmark/index.html`，包含
+可复现 fixture HTML、真实 target bbox、全局网格、选中格子细尺和 preview。
+如果环境里设置了 `MOONSHOT_API_KEY` 且不传 `--skip-api`，脚本会调用 Kimi
+比较“直接给坐标”和“两步 CanpGrid 细尺流程”，并记录 token 消耗。
 
 ## 许可证
 

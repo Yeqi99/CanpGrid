@@ -7,6 +7,7 @@ from typing import Any
 import typer
 
 from .core import (
+    create_cell_ruler_view,
     create_grid_view,
     zoom_region,
 )
@@ -85,6 +86,34 @@ def zoom(
         show_axis_ticks=show_axis_ticks,
         out_dir=out,
         save_cropped=save_cropped,
+    )
+    _print_json(result)
+
+
+@app.command("cell-ruler")
+def cell_ruler(
+    image_path: Path = typer.Argument(..., exists=True, readable=True),
+    grid_size: str = typer.Option(..., "--grid-size", help="Grid size like 9x20."),
+    cell: str = typer.Option(..., "--cell", help="Cell like 7x1."),
+    levels: str = typer.Option("[]", "--levels", help="JSON level path."),
+    detail_mode: str = typer.Option("medium", "--detail-mode"),
+    ruler_size: str = typer.Option("8x8", "--ruler-size", help="Ruler size like 8x8."),
+    zoom_factor: float = typer.Option(1.0, "--zoom-factor"),
+    out: Path = typer.Option(Path("outputs"), "--out"),
+    show_axis_ticks: bool = typer.Option(True, "--show-axis-ticks/--hide-axis-ticks"),
+) -> None:
+    """Create a selected-cell fine ruler view without zooming into the cell."""
+
+    result = create_cell_ruler_view(
+        image_path,
+        _parse_json(levels, "levels"),
+        grid_size=_parse_size(grid_size, "grid_size"),
+        cell=_parse_size(cell, "cell"),
+        detail_mode=_detail_mode(detail_mode),
+        ruler_config=_ruler_config(ruler_size),
+        zoom_factor=zoom_factor,
+        show_axis_ticks=show_axis_ticks,
+        out_dir=out,
     )
     _print_json(result)
 

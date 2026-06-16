@@ -42,6 +42,29 @@ Anchors include `top_left`, `top`, `top_right`, `left`, `center`, `right`,
 
 `x` and `y` are ruler units inside the final region, not original-image pixels.
 
+## cell_ruler_point
+
+```json
+{
+  "type": "cell_ruler_point",
+  "grid_size": [9, 20],
+  "cell": [7, 1],
+  "x": 3,
+  "y": 6,
+  "ruler_size": [10, 10]
+}
+```
+
+This is for selection, not zoom. The model first chooses a visible grid cell,
+then gives a fine ruler position inside that cell. CanpGrid maps the cell and
+ruler ticks back to original-image pixels.
+
+Use this when the target is already visible enough and the model should not
+spend another turn zooming into the cell.
+
+For result metadata, the effective final region is the selected cell bbox on
+the original image.
+
 ## ruler_offset
 
 ```json
@@ -83,4 +106,3 @@ Negative offsets are supported.
 ```
 
 This describes a micro-grid inside the final resolved region.
-

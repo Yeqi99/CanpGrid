@@ -48,7 +48,14 @@ CanpGrid requires Python 3.10 or newer.
 ## Python API
 
 ```python
-from canpgrid import create_grid_view, preview_point, resolve_point, resolve_region, zoom_region
+from canpgrid import (
+    create_cell_ruler_view,
+    create_grid_view,
+    preview_point,
+    resolve_point,
+    resolve_region,
+    zoom_region,
+)
 
 view = create_grid_view(
     "examples/sample.png",
@@ -70,15 +77,26 @@ zoomed = zoom_region(
 
 region = resolve_region("examples/sample.png", levels)
 
+cell_ruler = create_cell_ruler_view(
+    "examples/sample.png",
+    levels,
+    grid_size=[8, 6],
+    cell=[3, 4],
+    ruler_config={"tick_x": 10, "tick_y": 10},
+    zoom_factor=4,
+    out_dir="outputs",
+)
+
 point = resolve_point(
     "examples/sample.png",
     levels,
     {
-        "type": "hybrid_point",
-        "base": ["1/2", "1/2"],
-        "offset": [2, 3],
-        "unit": "ruler_tick",
-        "ruler_size": [16, 16],
+        "type": "cell_ruler_point",
+        "grid_size": [8, 6],
+        "cell": [3, 4],
+        "x": 3,
+        "y": 6,
+        "ruler_size": [10, 10],
     },
 )
 
@@ -86,11 +104,12 @@ preview = preview_point(
     "examples/sample.png",
     levels,
     {
-        "type": "hybrid_point",
-        "base": ["1/2", "1/2"],
-        "offset": [2, 3],
-        "unit": "ruler_tick",
-        "ruler_size": [16, 16],
+        "type": "cell_ruler_point",
+        "grid_size": [8, 6],
+        "cell": [3, 4],
+        "x": 3,
+        "y": 6,
+        "ruler_size": [10, 10],
     },
     preview_on="both",
     marker_style="ring_crosshair_inset",
@@ -98,8 +117,12 @@ preview = preview_point(
 )
 ```
 
-`create_grid_view` and `zoom_region` always return an `annotated_image_path`.
+`create_grid_view`, `zoom_region`, and `create_cell_ruler_view` always return
+an `annotated_image_path`.
 The bbox metadata is companion data, not the main output.
+`create_cell_ruler_view` highlights one selected grid cell and draws a finer
+ruler inside it, so an agent can say "cell `[3, 4]`, horizontal tick `3`,
+vertical tick `6`" without spending another observation turn on zooming.
 `preview_point` creates a non-executing focus preview so an agent can inspect a
 candidate point before confirming or adjusting it. Use `preview_on="both"` when
 the local view is highly zoomed: the current-view preview checks precision, and
@@ -129,6 +152,12 @@ Zoom a selected region:
 
 ```bash
 canpgrid zoom examples/sample.png --levels '[{"grid_size":[12,7],"cell":[6,2]}]' --out outputs/
+```
+
+Add a fine ruler inside a selected cell without another zoom step:
+
+```bash
+canpgrid cell-ruler examples/sample.png --levels '[{"grid_size":[12,7],"cell":[6,2]}]' --grid-size 8x6 --cell 3x4 --ruler-size 10x10 --zoom-factor 4 --out outputs/
 ```
 
 Resolve a region:
@@ -177,6 +206,7 @@ Point specs include:
 - `ruler_point`
 - `ruler_offset`
 - `hybrid_point`
+- `cell_ruler_point`
 - `subgrid_point`
 
 See [docs/protocol.md](docs/protocol.md) and
@@ -209,6 +239,18 @@ shows a Codex-baseline localization trace for a small UI action scenario with
 checkboxes, text fields, and buttons. It is a progress artifact for release
 review; it identifies candidate image-space positions only and does not execute
 real clicks or add UI automation to Core.
+
+## WeChat-Like DOM Benchmark
+
+```bash
+python examples/kimi_wechat_dom_benchmark.py --skip-api
+```
+
+This generates `outputs/wechat_dom_benchmark/index.html`, a reproducible
+WeChat-like UI benchmark with fixture HTML, exact target bboxes, global grid
+views, selected-cell ruler examples, and point previews. If `MOONSHOT_API_KEY`
+is set and `--skip-api` is omitted, the script compares direct model coordinates
+against the two-step CanpGrid cell-ruler workflow and records token usage.
 
 ## Tests
 

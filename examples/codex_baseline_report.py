@@ -16,7 +16,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from canpgrid import create_grid_view, preview_point, resolve_point, resolve_region, zoom_region
+from canpgrid import (
+    create_cell_ruler_view,
+    create_grid_view,
+    preview_point,
+    resolve_point,
+    resolve_region,
+    zoom_region,
+)
 
 REPORT_DIR = ROOT / "outputs" / "codex_baseline_report"
 ASSET_DIR = REPORT_DIR / "assets"
@@ -25,8 +32,7 @@ SOURCE_IMAGE = ASSET_DIR / "automation_settings_source.png"
 
 GLOBAL_GRID = [12, 8]
 LOCAL_GRID = [8, 6]
-FINAL_GRID = [8, 8]
-RULER_SIZE = [16, 16]
+RULER_SIZE = [10, 10]
 CANVAS_SIZE = (1440, 900)
 
 
@@ -234,7 +240,7 @@ def draw_dropdown(
 def draw_preview_panel(draw: ImageDraw.ImageDraw, font: ImageFont.ImageFont) -> None:
     draw.rounded_rectangle((910, 530, 1280, 642), radius=8, fill="#f8fbfd", outline="#d7dce8")
     draw.text((934, 558), "Preview target", fill="#344054", font=font)
-    draw.text((934, 586), "5 image observations, hybrid overlay", fill="#667085", font=font)
+    draw.text((934, 586), "5 image observations, cell ruler overlay", fill="#667085", font=font)
     draw.text((934, 614), "Estimated trace confidence: baseline", fill="#667085", font=font)
 
 
@@ -262,18 +268,22 @@ def build_action_trace(target: ActionTarget) -> dict[str, Any]:
 
     second_cell = cell_for_point(target.target_point, first_region["bbox_on_original"], LOCAL_GRID)
     second_level = {"grid_size": LOCAL_GRID, "cell": second_cell}
-    levels = [first_level, second_level]
-    final_region = resolve_region(SOURCE_IMAGE, levels)
-    point_spec = ruler_point_for_target(target.target_point, final_region["bbox_on_original"])
+    levels = [first_level]
+    final_region = resolve_region(SOURCE_IMAGE, [first_level, second_level])
+    point_spec = cell_ruler_point_for_target(
+        target.target_point,
+        first_region["bbox_on_original"],
+        second_cell,
+    )
 
-    final_view = zoom_region(
+    final_view = create_cell_ruler_view(
         SOURCE_IMAGE,
-        levels,
-        next_grid_size=FINAL_GRID,
-        overlay_mode="hybrid",
+        [first_level],
+        grid_size=LOCAL_GRID,
+        cell=second_cell,
         detail_mode="fine",
         ruler_config={"tick_x": RULER_SIZE[0], "tick_y": RULER_SIZE[1]},
-        zoom_factor=18,
+        zoom_factor=8,
         out_dir=ASSET_DIR,
     )
 
@@ -285,7 +295,7 @@ def build_action_trace(target: ActionTarget) -> dict[str, Any]:
         preview_on="current_view",
         marker_style="ring_crosshair_inset",
         out_dir=ASSET_DIR,
-        zoom_factor=18,
+        zoom_factor=8,
     )
     global_preview_result = preview_point(
         SOURCE_IMAGE,
@@ -294,7 +304,7 @@ def build_action_trace(target: ActionTarget) -> dict[str, Any]:
         preview_on="original_image",
         marker_style="ring_crosshair",
         out_dir=ASSET_DIR,
-        zoom_factor=18,
+        zoom_factor=8,
     )
     resolved_point = point_result["point_on_original"]
     error_px = math.dist(target.target_point, resolved_point)
@@ -334,18 +344,26 @@ def cell_for_point(
     return [clamp(cell_x, 0, cols - 1), clamp(cell_y, 0, rows - 1)]
 
 
-def ruler_point_for_target(
-    point: tuple[float, float], bbox: dict[str, float | int]
+def cell_ruler_point_for_target(
+    point: tuple[float, float],
+    bbox: dict[str, float | int],
+    cell: list[int],
 ) -> dict[str, Any]:
+    cols, rows = LOCAL_GRID
     x1 = float(bbox["x1"])
     y1 = float(bbox["y1"])
     width = float(bbox["width"])
     height = float(bbox["height"])
-    tick_x = round((point[0] - x1) / width * RULER_SIZE[0])
-    tick_y = round((point[1] - y1) / height * RULER_SIZE[1])
+    cell_width = width / cols
+    cell_height = height / rows
+    cell_x1 = x1 + cell[0] * cell_width
+    cell_y1 = y1 + cell[1] * cell_height
+    tick_x = round((point[0] - cell_x1) / cell_width * RULER_SIZE[0])
+    tick_y = round((point[1] - cell_y1) / cell_height * RULER_SIZE[1])
     return {
-        "type": "ruler_point",
-        "origin": "top_left",
+        "type": "cell_ruler_point",
+        "grid_size": LOCAL_GRID,
+        "cell": cell,
         "x": clamp(tick_x, 0, RULER_SIZE[0]),
         "y": clamp(tick_y, 0, RULER_SIZE[1]),
         "ruler_size": RULER_SIZE,
@@ -531,7 +549,7 @@ def write_html(
     <p class="subtitle">
       这份报告把一个更像真实界面的组合动作拆开：复选框、文本框和按钮。
       当前 Codex 作为观察者基座，只负责给出每一步的候选图片坐标；
-      CanpGrid 负责把全图网格、局部放大和 ruler 点位解析成原图坐标。
+      CanpGrid 负责把全图网格、局部放大和格子内细尺点位解析成原图坐标。
     </p>
     <div class="meta">
       <span class="pill">CanpGrid {html.escape(package_version)}</span>
@@ -687,7 +705,7 @@ def render_trace_card(trace: dict[str, Any]) -> str:
     </div>
     <div class="step">
       <strong>3 · 细定位</strong>
-      <span>使用 ruler_point：{point_spec_json}</span>
+      <span>使用 cell_ruler_point：{point_spec_json}</span>
     </div>
     <div class="step">
       <strong>4 · 回写原图</strong>
@@ -705,9 +723,9 @@ def render_trace_card(trace: dict[str, Any]) -> str:
     <figure>
       <img
         src="{html.escape(trace["final_view"])}"
-        alt="final hybrid view for {html.escape(trace["name"])}"
+        alt="selected cell ruler view for {html.escape(trace["name"])}"
       >
-      <figcaption>第二层 cell 后的 hybrid/ruler 精定位观察图。</figcaption>
+      <figcaption>不再递归放大：在选中 cell 里叠加细尺做精定位。</figcaption>
     </figure>
     <figure>
       <img

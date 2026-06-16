@@ -146,6 +146,53 @@ def draw_hybrid_overlay(
     )
 
 
+def draw_cell_ruler_overlay(
+    image: Image.Image,
+    grid_size: GridSize,
+    cell: tuple[int, int],
+    *,
+    detail_mode: DetailMode = "medium",
+    ruler_config: RulerConfig | Mapping[str, object] | None = None,
+    show_axis_ticks: bool = True,
+    level_label: str | None = None,
+    path_label: str | None = None,
+) -> Image.Image:
+    cols, rows = validate_grid_size(grid_size)
+    cell_x, cell_y = cell
+    if cell_x < 0 or cell_x >= cols or cell_y < 0 or cell_y >= rows:
+        raise ValueError("cell must be inside grid_size")
+
+    result = draw_grid_overlay(
+        image,
+        grid_size,
+        detail_mode=detail_mode,
+        show_axis_ticks=show_axis_ticks,
+        level_label=level_label,
+        path_label=path_label,
+    ).convert("RGBA")
+    overlay = Image.new("RGBA", result.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    config = _ruler_config(detail_mode, ruler_config)
+    cell_box = _cell_rect(image.size, (cols, rows), (cell_x, cell_y))
+
+    draw.rounded_rectangle(
+        cell_box,
+        radius=8,
+        fill=(255, 244, 160, 26),
+        outline=(255, 210, 64, 235),
+        width=max(3, _style(detail_mode)["line_width"] + 2),
+    )
+    _draw_ruler_lines_in_rect(
+        draw,
+        cell_box,
+        config,
+        ruler_color=(255, 214, 71, 140),
+        major_color=(255, 255, 255, 230),
+    )
+    _draw_cell_ruler_labels(draw, cell_box, config)
+    return Image.alpha_composite(result, overlay).convert("RGB")
+
+
 def draw_overlay(
     image: Image.Image,
     overlay_mode: OverlayMode,
@@ -276,6 +323,61 @@ def _draw_ruler_lines(
             draw.line([(width - line_len, y), (width, y)], fill=color, width=1)
             guide_color = (color[0], color[1], color[2], max(25, color[3] // 3))
             draw.line([(0, y), (width, y)], fill=guide_color, width=1)
+
+
+def _draw_ruler_lines_in_rect(
+    draw: ImageDraw.ImageDraw,
+    rect: tuple[int, int, int, int],
+    config: RulerConfig,
+    ruler_color: tuple[int, int, int, int],
+    major_color: tuple[int, int, int, int],
+) -> None:
+    left, top, right, bottom = rect
+    width = max(1, right - left)
+    height = max(1, bottom - top)
+
+    for tick in range(config.tick_x + 1):
+        x = left + round(tick * width / config.tick_x)
+        color = major_color if tick % config.show_labels_every == 0 else ruler_color
+        if config.show_minor_ticks or tick % config.show_labels_every == 0:
+            draw.line((x, top, x, bottom), fill=color, width=1)
+
+    for tick in range(config.tick_y + 1):
+        y = top + round(tick * height / config.tick_y)
+        color = major_color if tick % config.show_labels_every == 0 else ruler_color
+        if config.show_minor_ticks or tick % config.show_labels_every == 0:
+            draw.line((left, y, right, y), fill=color, width=1)
+
+
+def _draw_cell_ruler_labels(
+    draw: ImageDraw.ImageDraw, rect: tuple[int, int, int, int], config: RulerConfig
+) -> None:
+    left, top, right, bottom = rect
+    width = max(1, right - left)
+    height = max(1, bottom - top)
+    for tick in range(config.tick_x + 1):
+        if tick % config.show_labels_every != 0:
+            continue
+        x = left + round(tick * width / config.tick_x)
+        _draw_label(draw, str(tick), (x + 3, top + 3))
+    for tick in range(config.tick_y + 1):
+        if tick % config.show_labels_every != 0:
+            continue
+        y = top + round(tick * height / config.tick_y)
+        _draw_label(draw, str(tick), (left + 3, y + 3))
+
+
+def _cell_rect(
+    size: tuple[int, int], grid_size: tuple[int, int], cell: tuple[int, int]
+) -> tuple[int, int, int, int]:
+    width, height = size
+    cols, rows = grid_size
+    cell_x, cell_y = cell
+    left = _scaled_position(cell_x, cols, width)
+    top = _scaled_position(cell_y, rows, height)
+    right = _scaled_position(cell_x + 1, cols, width)
+    bottom = _scaled_position(cell_y + 1, rows, height)
+    return left, top, right, bottom
 
 
 def _draw_ruler_axis_labels(

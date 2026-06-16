@@ -10,7 +10,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from canpgrid import create_grid_view, preview_point, resolve_point, resolve_region, zoom_region
+from canpgrid import (
+    create_cell_ruler_view,
+    create_grid_view,
+    preview_point,
+    resolve_point,
+    resolve_region,
+    zoom_region,
+)
 
 SAMPLE = ROOT / "examples" / "sample_images" / "sample.png"
 OUT_DIR = ROOT / "outputs" / "demo"
@@ -37,6 +44,15 @@ def main() -> None:
     )
 
     levels_2 = [*levels_1, {"grid_size": [8, 6], "cell": [3, 4]}]
+    cell_ruler_view = create_cell_ruler_view(
+        SAMPLE,
+        levels_1,
+        grid_size=[8, 6],
+        cell=[3, 4],
+        ruler_config={"tick_x": 10, "tick_y": 10},
+        zoom_factor=3,
+        out_dir=OUT_DIR,
+    )
     final_view = zoom_region(
         SAMPLE,
         levels_2,
@@ -62,6 +78,18 @@ def main() -> None:
             "offset": [2, 3],
             "unit": "ruler_tick",
             "ruler_size": [16, 16],
+        },
+    )
+    cell_ruler_point = resolve_point(
+        SAMPLE,
+        levels_1,
+        {
+            "type": "cell_ruler_point",
+            "grid_size": [8, 6],
+            "cell": [3, 4],
+            "x": 4,
+            "y": 7,
+            "ruler_size": [10, 10],
         },
     )
     first_preview = preview_point(
@@ -94,6 +122,22 @@ def main() -> None:
         zoom_factor=24,
         out_dir=OUT_DIR,
     )
+    cell_ruler_preview = preview_point(
+        SAMPLE,
+        levels_1,
+        {
+            "type": "cell_ruler_point",
+            "grid_size": [8, 6],
+            "cell": [3, 4],
+            "x": 4,
+            "y": 7,
+            "ruler_size": [10, 10],
+        },
+        preview_on="both",
+        marker_style="ring_crosshair_inset",
+        zoom_factor=3,
+        out_dir=OUT_DIR,
+    )
 
     print(
         json.dumps(
@@ -101,12 +145,15 @@ def main() -> None:
                 "sample_image": str(SAMPLE),
                 "first_view": first_view,
                 "second_view": second_view,
+                "cell_ruler_view": cell_ruler_view,
                 "final_view": final_view,
                 "region": region,
                 "normalized_point": normalized_point,
                 "hybrid_point": hybrid_point,
+                "cell_ruler_point": cell_ruler_point,
                 "first_preview": first_preview,
                 "adjusted_preview": adjusted_preview,
+                "cell_ruler_preview": cell_ruler_preview,
             },
             ensure_ascii=False,
             indent=2,

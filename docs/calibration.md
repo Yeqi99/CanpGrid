@@ -13,6 +13,8 @@ observation configurations:
 - `grid`: coarse recursive region selection
 - `ruler`: fine local coordinate selection
 - `hybrid`: grid plus ruler for region and point descriptions
+- `cell_ruler`: selected cell plus fine ruler for point selection without
+  another zoom step
 
 Calibration can measure whether overlays improve spatial accuracy compared with
 the no-overlay baseline:
@@ -26,6 +28,7 @@ A future Model Visual Profile could include:
 - Best overlay mode by task family.
 - Preferred grid density by image size.
 - Preferred ruler tick count.
+- Accuracy and token tradeoff for one-step direct coordinates vs two-step
+  `cell_ruler_point`.
 - Error distribution by region size.
 - Overlay gain compared with baseline.
-

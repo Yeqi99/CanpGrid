@@ -130,6 +130,46 @@ class GridViewResult:
 
 
 @dataclass(frozen=True)
+class CellRulerViewResult:
+    view_id: str
+    image_width: int
+    image_height: int
+    level: int
+    grid_size: GridSize
+    cell: Cell
+    ruler_config: RulerConfig
+    bbox_on_original: BBox
+    cell_bbox_on_original: BBox
+    annotated_image_path: Path
+    levels: tuple[Level, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "view_id": self.view_id,
+            "image_width": self.image_width,
+            "image_height": self.image_height,
+            "level": self.level,
+            "grid_size": list(self.grid_size),
+            "cell": list(self.cell),
+            "ruler_config": self.ruler_config.to_dict(),
+            "bbox_on_original": self.bbox_on_original.to_dict(),
+            "cell_bbox_on_original": self.cell_bbox_on_original.to_dict(),
+            "annotated_image_path": str(self.annotated_image_path),
+            "point_spec_template": {
+                "type": "cell_ruler_point",
+                "grid_size": list(self.grid_size),
+                "cell": list(self.cell),
+                "x": "<0..ruler_x>",
+                "y": "<0..ruler_y>",
+                "ruler_size": [self.ruler_config.tick_x, self.ruler_config.tick_y],
+            },
+        }
+        if self.levels:
+            data["levels"] = [level.to_dict() for level in self.levels]
+        return data
+
+
+@dataclass(frozen=True)
 class RegionResult:
     bbox_on_original: BBox
     width: float

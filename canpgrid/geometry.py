@@ -70,6 +70,18 @@ def resolve_point_in_bbox(bbox: BBox, point_spec: Mapping[str, Any]) -> Point:
         y = _number(point_spec.get("y"), "y")
         return (bbox.x1 + bbox.width * (x / ruler_x), bbox.y1 + bbox.height * (y / ruler_y))
 
+    if point_type == "cell_ruler_point":
+        grid_size = validate_grid_size(_sequence(point_spec.get("grid_size"), "grid_size"))
+        cell = validate_cell(_sequence(point_spec.get("cell"), "cell"), grid_size)
+        ruler_x, ruler_y = _ruler_size(point_spec.get("ruler_size"))
+        x = _number(point_spec.get("x"), "x")
+        y = _number(point_spec.get("y"), "y")
+        cell_bbox = _grid_cell_bbox(bbox, grid_size, cell)
+        return (
+            cell_bbox.x1 + cell_bbox.width * (x / ruler_x),
+            cell_bbox.y1 + cell_bbox.height * (y / ruler_y),
+        )
+
     if point_type == "ruler_offset":
         anchor_x, anchor_y = _anchor(point_spec.get("anchor"))
         ruler_x, ruler_y = _ruler_size(point_spec.get("ruler_size"))
@@ -106,6 +118,35 @@ def resolve_point_in_bbox(bbox: BBox, point_spec: Mapping[str, Any]) -> Point:
     raise ValueError(f"unknown point_spec type: {point_type!r}")
 
 
+def resolve_point_region_in_bbox(bbox: BBox, point_spec: Mapping[str, Any]) -> BBox:
+    """Return the smallest protocol region that contains the resolved point."""
+
+    if not isinstance(point_spec, Mapping):
+        raise ValueError("point_spec must be a mapping")
+    point_type = point_spec.get("type")
+
+    if point_type == "cell_ruler_point":
+        grid_size = validate_grid_size(_sequence(point_spec.get("grid_size"), "grid_size"))
+        cell = validate_cell(_sequence(point_spec.get("cell"), "cell"), grid_size)
+        return _grid_cell_bbox(bbox, grid_size, cell)
+
+    if point_type == "subgrid_point":
+        grid_size = validate_grid_size(_sequence(point_spec.get("grid_size"), "grid_size"))
+        cell = validate_cell(_sequence(point_spec.get("cell"), "cell"), grid_size)
+        return _grid_cell_bbox(bbox, grid_size, cell)
+
+    if point_type in {
+        "normalized_point",
+        "anchor_offset",
+        "ruler_point",
+        "ruler_offset",
+        "hybrid_point",
+    }:
+        return bbox
+
+    raise ValueError(f"unknown point_spec type: {point_type!r}")
+
+
 def _validate_image_size(image_size: tuple[int, int]) -> tuple[int, int]:
     width, height = image_size
     if width < 1 or height < 1:
@@ -115,6 +156,17 @@ def _validate_image_size(image_size: tuple[int, int]) -> tuple[int, int]:
 
 def _point_from_normalized(bbox: BBox, fx: float, fy: float) -> Point:
     return (bbox.x1 + bbox.width * fx, bbox.y1 + bbox.height * fy)
+
+
+def _grid_cell_bbox(bbox: BBox, grid_size: tuple[int, int], cell: tuple[int, int]) -> BBox:
+    cell_width = bbox.width / grid_size[0]
+    cell_height = bbox.height / grid_size[1]
+    return BBox(
+        bbox.x1 + cell[0] * cell_width,
+        bbox.y1 + cell[1] * cell_height,
+        bbox.x1 + (cell[0] + 1) * cell_width,
+        bbox.y1 + (cell[1] + 1) * cell_height,
+    )
 
 
 def _fraction_pair(value: Any, field_name: str, *, signed: bool = False) -> tuple[float, float]:
@@ -189,4 +241,3 @@ def _sequence(value: Any, field_name: str) -> Sequence[Any]:
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
         raise ValueError(f"{field_name} must be a sequence")
     return value
-

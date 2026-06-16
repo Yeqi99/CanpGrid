@@ -36,6 +36,31 @@ new local canvas whose coordinate system starts again at `[0, 0]`.
 
 The second level is relative to the first level's crop, not the original image.
 
+## Selection without zoom
+
+Sometimes the target is already visible enough and another zoom step is
+unnecessary. In that case, callers can ask for a selected-cell ruler view:
+
+```json
+{
+  "grid_size": [9, 20],
+  "cell": [7, 1],
+  "ruler_size": [10, 10]
+}
+```
+
+The model can then answer with a `cell_ruler_point`, such as "cell `[7, 1]`,
+horizontal tick `3`, vertical tick `6`". This keeps the model in a structured
+coordinate protocol without forcing it to output raw pixels.
+
+Use zoom when the target content is visually ambiguous. Use a cell ruler when
+the target is clear and only needs a more precise point inside the selected
+cell.
+
+The resolved `final_region_bbox_on_original` for `cell_ruler_point` is the
+selected cell bbox, not the larger parent view. This keeps previews and reports
+aligned with the actual region that the model refined.
+
 ## Main output
 
 Every `create_grid_view` and `zoom_region` call creates a new annotated image.
