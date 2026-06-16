@@ -144,6 +144,31 @@ Supported `target_color` forms:
 - `{"r": 52, "g": 199, "b": 89}`
 - common names such as `blue`, `red`, `green`, `black`, or `white`
 
+When the tool has extracted a local color palette, the model can choose by ID
+instead of inventing a precise color:
+
+```json
+{
+  "type": "color_snap_point",
+  "grid_size": [9, 20],
+  "cell": [3, 6],
+  "local_point": [0.5, 0.5],
+  "target_color_id": "c3",
+  "color_choices": [
+    {"id": "c1", "hex": "#ffffff", "name": "white"},
+    {"id": "c2", "hex": "#111111", "name": "black"},
+    {"id": "c3", "hex": "#34c759", "name": "green"}
+  ],
+  "tolerance": 56,
+  "search": {"mode": "nearest", "radius": 96},
+  "fallback": "base_point"
+}
+```
+
+The `grid_size`, `cell`, and `local_point` shorthand is treated as a
+`subgrid_point` base. This keeps the model-facing schema short for
+multiple-choice color snap workflows.
+
 `tolerance` is an RGB distance, useful for antialiasing and screenshot
 compression.
 

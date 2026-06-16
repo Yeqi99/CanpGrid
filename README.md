@@ -20,6 +20,7 @@ layer.
 - Region path to original bbox
 - Flexible point_spec protocol
 - Candidate point preview images
+- Palette-guided color snap choices
 - CLI and Python API
 - Agent-friendly JSON outputs
 - Calibration-ready design
@@ -49,6 +50,7 @@ CanpGrid requires Python 3.10 or newer.
 
 ```python
 from canpgrid import (
+    extract_color_choices,
     create_cell_ruler_view,
     create_grid_view,
     preview_point,
@@ -100,6 +102,12 @@ point = resolve_point(
     },
 )
 
+color_choices = extract_color_choices(
+    "examples/sample.png",
+    bbox=point["final_region_bbox_on_original"],
+    palette_size=8,
+)
+
 preview = preview_point(
     "examples/sample.png",
     levels,
@@ -127,6 +135,9 @@ vertical tick `6`" without spending another observation turn on zooming.
 candidate point before confirming or adjusting it. Use `preview_on="both"` when
 the local view is highly zoomed: the current-view preview checks precision, and
 the original-image preview keeps the global UI context visible.
+`extract_color_choices` turns a local crop into a small `c1`, `c2`, ... palette
+so weaker models can choose a color ID for `color_snap_point` instead of
+inventing a precise hex value.
 
 ## CLI
 
@@ -218,6 +229,9 @@ See [docs/protocol.md](docs/protocol.md) and
 nearby pixel with a chosen color by nearest search or directional ray scan. This
 helps when a model can pick the right UI part but cannot place the final point
 precisely enough by ruler ticks alone.
+When color choices are available, the agent can provide `target_color_id` plus
+`color_choices`, and CanpGrid resolves the ID to the actual color before
+snapping.
 
 ## Calibration Potential
 

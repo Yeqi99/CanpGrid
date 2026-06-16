@@ -47,12 +47,7 @@ def resolve_color_snap(
     point_spec: Mapping[str, Any],
 ) -> ColorSnapResult:
     search = _mapping(point_spec.get("search", {}), "search")
-    target_color = _color(
-        point_spec.get(
-            "target_color",
-            point_spec.get("color", point_spec.get("rgb")),
-        )
-    )
+    target_color = _target_color(point_spec)
     tolerance = _nonnegative_number(
         point_spec.get("tolerance", search.get("tolerance", 24)),
         "tolerance",
@@ -238,6 +233,53 @@ def _color(value: Any) -> tuple[int, int, int]:
         )
 
     raise ValueError("target_color must be #RRGGBB, a known color name, or [r,g,b]")
+
+
+def _target_color(point_spec: Mapping[str, Any]) -> tuple[int, int, int]:
+    color_id = point_spec.get("target_color_id", point_spec.get("color_id"))
+    if color_id is not None:
+        return _palette_color(point_spec, str(color_id))
+    return _color(
+        point_spec.get(
+            "target_color",
+            point_spec.get("color", point_spec.get("rgb")),
+        )
+    )
+
+
+def _palette_color(point_spec: Mapping[str, Any], color_id: str) -> tuple[int, int, int]:
+    choices = point_spec.get(
+        "color_choices",
+        point_spec.get("palette", point_spec.get("colors")),
+    )
+    if choices is None:
+        raise ValueError("target_color_id requires color_choices or palette")
+
+    if isinstance(choices, Mapping):
+        if color_id in choices:
+            return _color(_color_choice_value(choices[color_id]))
+        iterable = choices.values()
+    elif isinstance(choices, Sequence) and not isinstance(choices, (str, bytes)):
+        iterable = choices
+    else:
+        raise ValueError("color_choices must be a list or mapping")
+
+    for choice in iterable:
+        if not isinstance(choice, Mapping):
+            continue
+        if str(choice.get("id", choice.get("color_id", ""))) == color_id:
+            return _color(_color_choice_value(choice))
+    raise ValueError(f"unknown target_color_id {color_id!r}")
+
+
+def _color_choice_value(choice: Any) -> Any:
+    if isinstance(choice, Mapping):
+        for key in ("hex", "target_color", "color", "rgb"):
+            if key in choice:
+                return choice[key]
+        if all(key in choice for key in ("r", "g", "b")):
+            return choice
+    return choice
 
 
 def _direction(value: Any) -> tuple[int, int]:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from PIL import Image
 
-from canpgrid import preview_point, resolve_point
+from canpgrid import extract_color_choices, preview_point, resolve_point
 
 LEVELS = [
     {"grid_size": [4, 4], "cell": [0, 0]},
@@ -144,6 +144,47 @@ def test_resolve_color_snap_point_nearest(tmp_path) -> None:
     assert result["point_on_original"] == [7, 8]
     assert result["point_resolution"]["search_mode"] == "nearest"
     assert result["point_resolution"]["matched"] is True
+
+
+def test_extract_color_choices_returns_model_palette(tmp_path) -> None:
+    image_path = tmp_path / "palette.png"
+    image = Image.new("RGB", (30, 30), "#ffffff")
+    for y in range(5, 25):
+        for x in range(5, 25):
+            image.putpixel((x, y), (0, 200, 80))
+    image.save(image_path)
+
+    choices = extract_color_choices(image_path, palette_size=4)
+
+    assert choices[0]["id"] == "c1"
+    assert any(choice["name"] == "green" for choice in choices)
+    assert all("hex" in choice and "coverage" in choice for choice in choices)
+
+
+def test_resolve_color_snap_point_with_color_choice_id_and_shorthand(tmp_path) -> None:
+    image_path = tmp_path / "color-id.png"
+    image = Image.new("RGB", (20, 20), "#ffffff")
+    image.putpixel((7, 8), (0, 200, 80))
+    image.save(image_path)
+
+    result = resolve_point(
+        image_path,
+        [],
+        {
+            "type": "color_snap_point",
+            "grid_size": [2, 2],
+            "cell": [0, 0],
+            "local_point": [0.5, 0.5],
+            "target_color_id": "c1",
+            "color_choices": [{"id": "c1", "hex": "#00c850", "name": "green"}],
+            "tolerance": 0,
+            "search": {"mode": "nearest", "radius": 5},
+        },
+    )
+
+    assert result["point_on_original"] == [7, 8]
+    assert result["point_resolution"]["base_point_on_original"] == [5, 5]
+    assert result["point_resolution"]["matched_color"] == [0, 200, 80]
 
 
 def test_resolve_color_snap_point_requires_image_path() -> None:

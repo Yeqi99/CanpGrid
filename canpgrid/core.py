@@ -319,6 +319,13 @@ def _resolve_point_spec(
     if image is None:
         raise ValueError("color_snap_point requires image pixels")
     base_spec = point_spec.get("base")
+    if not isinstance(base_spec, Mapping) and "grid_size" in point_spec and "cell" in point_spec:
+        base_spec = {
+            "type": "subgrid_point",
+            "grid_size": point_spec["grid_size"],
+            "cell": point_spec["cell"],
+            "local_point": point_spec.get("local_point", [0.5, 0.5]),
+        }
     if not isinstance(base_spec, Mapping):
         raise ValueError("color_snap_point requires a base point_spec mapping")
     base_point, _base_region, base_resolution = _resolve_point_spec(

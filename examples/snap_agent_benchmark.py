@@ -23,11 +23,18 @@ if str(ROOT) not in sys.path:
 if str(ROOT / "examples") not in sys.path:
     sys.path.insert(0, str(ROOT / "examples"))
 
-from canpgrid import create_grid_view, resolve_point
+from canpgrid import (
+    compact_color_choice_prompt,
+    create_grid_view,
+    draw_color_choice_sheet,
+    extract_color_choices,
+    resolve_point,
+)
 from canpgrid.evaluation import evaluate_interactions
 from interaction_benchmark import (
     GRID_SIZE,
     aggregate_usage,
+    context_bbox_for_cell,
     dedupe_predictions_by_id,
     draw_candidate_preview_map,
     draw_object_context_sheet,
@@ -49,6 +56,7 @@ DEFAULT_ANNOTATIONS = (
     / "search_targets_full_interactive.json"
 )
 DEFAULT_OUT_DIR = ROOT / "outputs" / "snap_agent_benchmark_search"
+PALETTE_SIZE = 8
 
 
 @dataclass(frozen=True)
@@ -229,15 +237,21 @@ def run_snap_agent(
         grid_size,
         out_dir / "multiblock_context.png",
     )
-    locate_prompt_text = locate_prompt(image_size, grid_size, inventory)
+    palettes = extract_object_palettes(image_path, inventory, grid_size)
+    palette_sheet = draw_palette_sheet(
+        inventory,
+        palettes,
+        out_dir / "object_palettes.png",
+    )
+    locate_prompt_text = locate_prompt(image_size, grid_size, inventory, palettes)
     locate_raw = call_openai_vision(
         provider=provider,
-        images=[image_path, grid_image, context_sheet],
+        images=[image_path, grid_image, context_sheet, palette_sheet],
         prompt=locate_prompt_text,
         timeout=timeout,
     )
     locate_predictions, locate_errors = safe_parse_point_spec_predictions(
-        locate_raw["content"], image_path, image_size, grid_size
+        locate_raw["content"], image_path, image_size, grid_size, palettes
     )
     locate_predictions = dedupe_predictions_by_id(locate_predictions)
     final_predictions = locate_predictions
@@ -250,18 +264,19 @@ def run_snap_agent(
         )
         review_raw = call_openai_vision(
             provider=provider,
-            images=[image_path, grid_image, context_sheet, preview_map],
+            images=[image_path, grid_image, context_sheet, palette_sheet, preview_map],
             prompt=review_prompt(
                 image_size,
                 grid_size,
                 inventory,
+                palettes,
                 final_predictions,
                 round_index,
             ),
             timeout=timeout,
         )
         review_predictions, review_errors = safe_parse_point_spec_predictions(
-            review_raw["content"], image_path, image_size, grid_size
+            review_raw["content"], image_path, image_size, grid_size, palettes
         )
         review_predictions = dedupe_predictions_by_id(review_predictions)
         if review_predictions:
@@ -289,6 +304,8 @@ def run_snap_agent(
         "inventory_raw": inventory_raw,
         "inventory_parse_error": inventory_parse_error,
         "context_sheet_path": str(context_sheet),
+        "palette_sheet_path": str(palette_sheet),
+        "palettes": palettes,
         "locate": {
             "raw": locate_raw,
             "prompt_chars": len(locate_prompt_text),
@@ -327,8 +344,10 @@ def locate_prompt(
     image_size: tuple[int, int],
     grid_size: list[int],
     inventory: list[dict[str, Any]],
+    palettes: dict[str, list[dict[str, Any]]],
 ) -> str:
     width, height = image_size
+    palette_prompt = compact_palette_prompt(palettes)
     return f"""
 You are locating final click focus points for known tappable UI objects.
 You are given:
@@ -336,17 +355,22 @@ You are given:
 2. CanpGrid global grid overlay
 3. a multi-block context sheet; each panel shows an object's rough cell and
    neighboring cells, so boundary objects remain visible.
+4. an object color palette sheet. For each object_id it shows color choices c1,
+   c2, ... extracted from that object's local context.
 
 For each object in the inventory, return at most one final point. Do not invent
 objects outside the inventory. Use a point_spec so CanpGrid can resolve it.
-This benchmark is specifically testing pixel color snap. Prefer color_snap_point
-whenever the object has a visible foreground, icon stroke, text color, or button
-fill that you can describe as an approximate RGB/hex color. Use plain
+This benchmark is specifically testing palette-choice pixel snap. Prefer
+color_snap_point whenever the object has a visible foreground, icon stroke, text
+color, or button fill that matches one of its listed palette choices. Use plain
 subgrid_point only for very large tappable content rows where any point inside
 the row is already acceptable.
 
 Inventory:
 {json.dumps(inventory, ensure_ascii=False, separators=(",", ":"))}
+
+Palette choices by object_id:
+{palette_prompt}
 
 Allowed point_spec forms:
 1. subgrid_point:
@@ -354,15 +378,18 @@ Allowed point_spec forms:
 "local_point":[0.5,0.5]}}
 
 2. color_snap_point, preferred for this benchmark:
-{{"type":"color_snap_point","base":{{"type":"subgrid_point","grid_size":{grid_size},
-"cell":[col,row],"local_point":[0.5,0.5]}},"target_color":"#RRGGBB",
-"tolerance":48,"search":{{"mode":"nearest","radius":32}}}}
+{{"type":"color_snap_point","grid_size":{grid_size},"cell":[col,row],
+"local_point":[0.5,0.5],"target_color_id":"c3",
+"tolerance":56,"search":{{"mode":"nearest","radius":96}},"fallback":"base_point"}}
 
 For color_snap_point, choose the base point close to the intended click area and
-choose target_color from a nearby visible pixel: green button fill, black icon
-stroke, gray icon stroke, colored text, or dark row title text. Use nearest for
-small icons or text. Use ray only when you can state a clear direction from the
-base point. Use tolerance 32-64 for antialiasing and screenshots.
+choose target_color_id from that object's palette only. Prefer foreground/icon/
+text colors over large white backgrounds. Use nearest for small icons or text.
+Use ray only when you can state a clear direction from the base point. Use
+tolerance 32-72 for antialiasing and screenshots. Do not choose white or
+near-white background colors for ordinary cards, rows, or input backgrounds.
+If no foreground/icon/text color is near the intended click area, use
+subgrid_point instead of color_snap_point.
 
 Image size is {width}x{height}. Origin is top-left.
 
@@ -377,10 +404,12 @@ def review_prompt(
     image_size: tuple[int, int],
     grid_size: list[int],
     inventory: list[dict[str, Any]],
+    palettes: dict[str, list[dict[str, Any]]],
     predictions: list[dict[str, Any]],
     round_index: int,
 ) -> str:
     width, height = image_size
+    palette_prompt = compact_palette_prompt(palettes)
     compact_predictions = [
         {
             "object_id": item.get("id"),
@@ -399,8 +428,9 @@ a candidate preview map with numbered ring/crosshair markers.
 
 Review the candidate markers. Return one final point per object_id at most.
 Confirm good points, adjust inaccurate points, and restore missing inventory
-objects when visible. Prefer color_snap_point when a visible nearby color can
-anchor the final point. This is observation only; do not execute clicks.
+objects when visible. Prefer color_snap_point when one of the object's palette
+choices can anchor the final point. This is observation only; do not execute
+clicks.
 
 Inventory:
 {json.dumps(inventory, ensure_ascii=False, separators=(",", ":"))}
@@ -408,9 +438,13 @@ Inventory:
 Current candidates:
 {json.dumps(compact_predictions, ensure_ascii=False, separators=(",", ":"))}
 
+Palette choices by object_id:
+{palette_prompt}
+
 Allowed point_spec forms are the same as before:
 - subgrid_point
-- color_snap_point wrapping a subgrid_point base
+- color_snap_point with grid_size, cell, local_point, and target_color_id from
+  that object's palette
 
 Image size is {width}x{height}. Grid size is {grid_size}. Return raw JSON only:
 {{"items":[{{"object_id":"search_field","label":"search field","role":"input",
@@ -424,6 +458,7 @@ def parse_point_spec_predictions(
     image_path: Path,
     image_size: tuple[int, int],
     grid_size: list[int],
+    palettes: dict[str, list[dict[str, Any]]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     data = json.loads(repair_common_json_key_typos(extract_json_text(content)))
     if isinstance(data, list):
@@ -442,6 +477,8 @@ def parse_point_spec_predictions(
             continue
         point_spec = item.get("point_spec")
         if isinstance(point_spec, dict):
+            object_id = str(item.get("object_id", item.get("id", "")))
+            point_spec = resolve_palette_point_spec(point_spec, object_id, palettes or {})
             try:
                 resolved = resolve_point(image_path, [], point_spec)
             except ValueError as exc:
@@ -482,11 +519,106 @@ def safe_parse_point_spec_predictions(
     image_path: Path,
     image_size: tuple[int, int],
     grid_size: list[int],
+    palettes: dict[str, list[dict[str, Any]]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     try:
-        return parse_point_spec_predictions(content, image_path, image_size, grid_size)
+        return parse_point_spec_predictions(
+            content,
+            image_path,
+            image_size,
+            grid_size,
+            palettes,
+        )
     except Exception as exc:
         return [], [{"error": str(exc), "raw_content": content}]
+
+
+def extract_object_palettes(
+    image_path: Path,
+    inventory: list[dict[str, Any]],
+    grid_size: list[int],
+    *,
+    context_radius: int = 1,
+    palette_size: int = PALETTE_SIZE,
+) -> dict[str, list[dict[str, Any]]]:
+    source = Image.open(image_path).convert("RGB")
+    palettes: dict[str, list[dict[str, Any]]] = {}
+    for item in inventory:
+        object_id = str(item["object_id"])
+        cell = item["rough_grid_cell"]
+        bbox = context_bbox_for_cell(
+            source.size,
+            grid_size,
+            (cell["col"], cell["row"]),
+            context_radius,
+        )
+        palettes[object_id] = extract_color_choices(
+            source,
+            bbox=bbox,
+            palette_size=palette_size,
+        )
+    return palettes
+
+
+def draw_palette_sheet(
+    inventory: list[dict[str, Any]],
+    palettes: dict[str, list[dict[str, Any]]],
+    out_path: Path,
+) -> Path:
+    labels = {str(item["object_id"]): str(item.get("label", "")) for item in inventory}
+    return draw_color_choice_sheet(palettes, out_path, labels=labels)
+
+
+def compact_palette_prompt(palettes: dict[str, list[dict[str, Any]]]) -> str:
+    return compact_color_choice_prompt(palettes)
+
+
+def resolve_palette_point_spec(
+    point_spec: dict[str, Any],
+    object_id: str,
+    palettes: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    resolved = json.loads(json.dumps(point_spec))
+    if resolved.get("type") == "color_snap_point":
+        if "base" not in resolved and isinstance(resolved.get("base_point"), dict):
+            resolved["base"] = resolved["base_point"]
+        if "base" not in resolved and "grid_size" in resolved and "cell" in resolved:
+            resolved["base"] = {
+                "type": "subgrid_point",
+                "grid_size": resolved["grid_size"],
+                "cell": resolved["cell"],
+                "local_point": resolved.get("local_point", [0.5, 0.5]),
+            }
+        color_id = resolved.get("target_color_id", resolved.get("color_id"))
+        if color_id is None and isinstance(resolved.get("target_color"), str):
+            token = resolved["target_color"]
+            if token.startswith("c") and token[1:].isdigit():
+                color_id = token
+        if color_id is not None:
+            color = palette_color(palettes, object_id, str(color_id))
+            resolved["target_color"] = color["hex"]
+            resolved["target_color_id"] = str(color_id)
+            resolved["color_choices"] = palettes.get(object_id, [])
+        resolved.setdefault("fallback", "base_point")
+        search = resolved.setdefault("search", {"mode": "nearest", "radius": 96})
+        if isinstance(search, dict) and search.get("mode", "nearest") == "nearest":
+            search.setdefault("radius", 96)
+        resolved.setdefault("tolerance", 56)
+    base = resolved.get("base")
+    if isinstance(base, dict):
+        resolved["base"] = resolve_palette_point_spec(base, object_id, palettes)
+    return resolved
+
+
+def palette_color(
+    palettes: dict[str, list[dict[str, Any]]],
+    object_id: str,
+    color_id: str,
+) -> dict[str, Any]:
+    for color in palettes.get(object_id, []):
+        if color.get("id") == color_id:
+            return color
+    raise ValueError(f"unknown target_color_id {color_id!r} for object_id {object_id!r}")
 
 
 def call_openai_vision(
@@ -549,6 +681,7 @@ def render_html(report: dict[str, Any], json_path: Path) -> str:
     provider_rows = []
     figures = []
     raw_blocks = []
+    method_summary = render_method_summary(report)
     for name, result in report["providers"].items():
         provider = result.get("provider", {"name": name, "model": ""})
         if result.get("error"):
@@ -616,6 +749,7 @@ def render_html(report: dict[str, Any], json_path: Path) -> str:
         <tbody>{''.join(provider_rows)}</tbody>
       </table>
     </section>
+    {method_summary}
     <section>
       <h2>基础图</h2>
       <div class="grid">
@@ -635,9 +769,75 @@ def render_html(report: dict[str, Any], json_path: Path) -> str:
 """
 
 
+def render_method_summary(report: dict[str, Any]) -> str:
+    provider_rows = []
+    best_score = None
+    best_name = None
+    for name, result in report["providers"].items():
+        if result.get("error") or "evaluation" not in result:
+            continue
+        final = result["evaluation"]["summary"]
+        single = result["single_pass_evaluation"]["summary"]
+        final_predictions = result.get("predictions") or []
+        single_predictions = result.get("single_pass_predictions") or []
+        final_snaps = count_point_source(final_predictions, "color_snap_point")
+        single_snaps = count_point_source(single_predictions, "color_snap_point")
+        final_fallbacks = count_snap_fallbacks(final_predictions)
+        parse_errors = len((result.get("locate") or {}).get("parse_errors") or [])
+        score = final["score_0_to_100"]
+        if best_score is None or score > best_score:
+            best_score = score
+            best_name = name
+        provider_rows.append(
+            f"<tr><td>{html.escape(name)}</td><td>{single_snaps}</td>"
+            f"<td>{final_snaps}</td><td>{final_fallbacks}</td><td>{parse_errors}</td>"
+            f"<td>{single['score_0_to_100']} -> {score}</td>"
+            f"<td>{final['missed_interactive_count']}</td>"
+            f"<td>{final['localization_error_count']}</td></tr>"
+        )
+
+    best_text = (
+        f"本轮最高为 {html.escape(str(best_name))}，{best_score} 分。"
+        if best_name is not None
+        else "本轮没有可用模型结果。"
+    )
+    return f"""
+    <section>
+      <h2>方法结论</h2>
+      <p>
+        自动主色选择题把“模型自由编颜色值”改成“模型选择 c1/c2/c3”，
+        这让 JSON 和吸附流程更稳定；但它只解决最终像素微调，
+        不能弥补漏掉可点击对象或选错网格区域。
+        {best_text} 要冲 90+，下一步应把“对象清单”和“候选点”
+        也做成选择题。
+      </p>
+      <table>
+        <thead><tr><th>模型</th><th>单次吸附点</th><th>最终吸附点</th>
+        <th>fallback</th><th>解析错</th><th>分数变化</th><th>漏识别</th>
+        <th>位置错</th></tr></thead>
+        <tbody>{''.join(provider_rows)}</tbody>
+      </table>
+    </section>
+    """
+
+
+def count_point_source(predictions: list[dict[str, Any]], point_source: str) -> int:
+    return sum(1 for item in predictions if item.get("point_source") == point_source)
+
+
+def count_snap_fallbacks(predictions: list[dict[str, Any]]) -> int:
+    return sum(
+        1
+        for item in predictions
+        if item.get("point_source") == "color_snap_point"
+        and (item.get("point_resolution") or {}).get("fallback_used")
+    )
+
+
 def render_provider_figures(name: str, result: dict[str, Any], root: Path) -> str:
     parts = [
         ("多区块上下文", result.get("context_sheet_path")),
+        ("自动提取色板", result.get("palette_sheet_path")),
         ("单次预测", result.get("single_pass_prediction_map")),
     ]
     for round_item in result.get("rounds", []):
