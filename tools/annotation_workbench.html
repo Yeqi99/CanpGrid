@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CanpGrid Interaction Annotation Workbench</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #182033;
+      --muted: #667085;
+      --line: #d8deea;
+      --paper: #f5f7fb;
+      --panel: #ffffff;
+      --accent: #0f8fb3;
+      --danger: #c24135;
+      --ok: #18864b;
+      --soft: #f8fbfd;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      line-height: 1.45;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 18px;
+      padding: 18px 22px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+    h1 { margin: 0; font-size: 20px; letter-spacing: 0; }
+    .muted { color: var(--muted); }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 380px;
+      gap: 16px;
+      padding: 16px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    button, .file-label {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      border-radius: 6px;
+      padding: 8px 10px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 14px;
+    }
+    button.primary {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
+    }
+    button.danger {
+      border-color: #f0c4bf;
+      color: var(--danger);
+      background: #fff8f7;
+    }
+    button:disabled {
+      cursor: not-allowed;
+      opacity: .5;
+    }
+    input[type="file"] { display: none; }
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 9px;
+      font: inherit;
+      font-size: 14px;
+      background: #fff;
+      color: var(--ink);
+    }
+    label span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin: 10px 0 4px;
+    }
+    .canvas-wrap {
+      position: relative;
+      overflow: auto;
+      max-height: calc(100vh - 165px);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #e9edf5;
+    }
+    canvas {
+      display: block;
+      margin: 0 auto;
+      background: #fff;
+      cursor: crosshair;
+    }
+    .side {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      max-height: calc(100vh - 100px);
+      overflow: auto;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .stat {
+      background: var(--soft);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px;
+    }
+    .stat b { display: block; color: var(--muted); font-size: 12px; font-weight: 600; }
+    .stat span { font-size: 15px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      border-bottom: 1px solid #e5e9f2;
+      padding: 7px 4px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-weight: 600; }
+    tr.selected { background: #e9f7fb; }
+    .pill {
+      display: inline-block;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 8px;
+      background: #fbfcff;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .empty {
+      padding: 28px;
+      color: var(--muted);
+      text-align: center;
+    }
+    @media (max-width: 980px) {
+      .layout { grid-template-columns: 1fr; }
+      .side { max-height: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>CanpGrid Interaction Annotation Workbench</h1>
+      <div class="muted">上传截图，拖拽圈出可点击区域，导出可用于评测的 JSON 标注。</div>
+    </div>
+    <span class="pill" id="imageMeta">No image loaded</span>
+  </header>
+
+  <main class="layout">
+    <section class="panel">
+      <div class="toolbar">
+        <label class="file-label">
+          上传截图
+          <input id="imageInput" type="file" accept="image/*">
+        </label>
+        <label class="file-label">
+          导入 JSON
+          <input id="jsonInput" type="file" accept="application/json,.json">
+        </label>
+        <button id="exportBtn" class="primary" disabled>导出 JSON</button>
+        <button id="copyBtn" disabled>复制 JSON</button>
+        <button id="deleteBtn" class="danger" disabled>删除选中</button>
+        <button id="clearBtn" class="danger" disabled>清空标注</button>
+      </div>
+      <div class="canvas-wrap">
+        <canvas id="canvas"></canvas>
+        <div class="empty" id="emptyState">先上传一张 app 截图，然后在图上拖拽画框。</div>
+      </div>
+      <div class="stats">
+        <div class="stat"><b>标注数量</b><span id="countStat">0</span></div>
+        <div class="stat"><b>当前缩放</b><span id="scaleStat">100%</span></div>
+        <div class="stat"><b>坐标模式</b><span>原图像素</span></div>
+      </div>
+    </section>
+
+    <aside class="side">
+      <section class="panel">
+        <h2 style="margin:0 0 8px;font-size:17px;">选中区域</h2>
+        <label>
+          <span>Label</span>
+          <input id="labelInput" placeholder="例如 搜索按钮 / 返回 / 输入框" disabled>
+        </label>
+        <div class="row">
+          <label>
+            <span>Role</span>
+            <select id="roleInput" disabled>
+              <option value="button">button</option>
+              <option value="tab">tab</option>
+              <option value="input">input</option>
+              <option value="checkbox">checkbox</option>
+              <option value="switch">switch</option>
+              <option value="link">link</option>
+              <option value="menu_item">menu_item</option>
+              <option value="other">other</option>
+            </select>
+          </label>
+          <label>
+            <span>Required</span>
+            <select id="requiredInput" disabled>
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
+          </label>
+        </div>
+        <div class="row">
+          <label><span>x1</span><input id="x1Input" type="number" disabled></label>
+          <label><span>y1</span><input id="y1Input" type="number" disabled></label>
+          <label><span>x2</span><input id="x2Input" type="number" disabled></label>
+          <label><span>y2</span><input id="y2Input" type="number" disabled></label>
+        </div>
+        <label>
+          <span>Notes</span>
+          <textarea id="notesInput" rows="3" placeholder="可选：这个区域为什么可点" disabled></textarea>
+        </label>
+      </section>
+
+      <section class="panel">
+        <h2 style="margin:0 0 8px;font-size:17px;">标注列表</h2>
+        <table>
+          <thead>
+            <tr><th>#</th><th>Label</th><th>Role</th><th>BBox</th></tr>
+          </thead>
+          <tbody id="annotationTable"></tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2 style="margin:0 0 8px;font-size:17px;">评测说明</h2>
+        <p class="muted" style="margin:0;">
+          导出的 JSON 可传给 <code>examples/interaction_benchmark.py</code>。
+          模型会自由识别全部可交互元素，评测器再和这些标注比对，区分漏识别、
+          错识别和位置错误。
+        </p>
+      </section>
+    </aside>
+  </main>
+
+  <script>
+    const state = {
+      image: null,
+      imageName: "",
+      imageDataUrl: "",
+      width: 0,
+      height: 0,
+      scale: 1,
+      annotations: [],
+      selectedId: null,
+      dragging: null,
+    };
+
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const emptyState = document.getElementById("emptyState");
+    const imageMeta = document.getElementById("imageMeta");
+    const countStat = document.getElementById("countStat");
+    const scaleStat = document.getElementById("scaleStat");
+    const table = document.getElementById("annotationTable");
+
+    const fields = {
+      label: document.getElementById("labelInput"),
+      role: document.getElementById("roleInput"),
+      required: document.getElementById("requiredInput"),
+      x1: document.getElementById("x1Input"),
+      y1: document.getElementById("y1Input"),
+      x2: document.getElementById("x2Input"),
+      y2: document.getElementById("y2Input"),
+      notes: document.getElementById("notesInput"),
+    };
+
+    document.getElementById("imageInput").addEventListener("change", loadImageFile);
+    document.getElementById("jsonInput").addEventListener("change", loadJsonFile);
+    document.getElementById("exportBtn").addEventListener("click", exportJson);
+    document.getElementById("copyBtn").addEventListener("click", copyJson);
+    document.getElementById("deleteBtn").addEventListener("click", deleteSelected);
+    document.getElementById("clearBtn").addEventListener("click", clearAnnotations);
+    canvas.addEventListener("pointerdown", startDraw);
+    canvas.addEventListener("pointermove", updateDraw);
+    canvas.addEventListener("pointerup", finishDraw);
+    canvas.addEventListener("pointerleave", finishDraw);
+
+    for (const [key, input] of Object.entries(fields)) {
+      input.addEventListener("input", () => updateSelectedFromFields(key));
+    }
+
+    function loadImageFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const image = new Image();
+        image.onload = () => {
+          state.image = image;
+          state.imageName = file.name;
+          state.imageDataUrl = reader.result;
+          state.width = image.naturalWidth;
+          state.height = image.naturalHeight;
+          state.annotations = [];
+          state.selectedId = null;
+          fitCanvas();
+          render();
+        };
+        image.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function loadJsonFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const data = JSON.parse(reader.result);
+        const annotations = data.annotations || data.targets || [];
+        state.annotations = annotations.map((item, index) => normalizeAnnotation(item, index));
+        state.selectedId = state.annotations[0]?.id || null;
+        if (data.image?.data_url) {
+          const image = new Image();
+          image.onload = () => {
+            state.image = image;
+            state.imageName = data.image.name || file.name;
+            state.imageDataUrl = data.image.data_url;
+            state.width = image.naturalWidth;
+            state.height = image.naturalHeight;
+            fitCanvas();
+            render();
+          };
+          image.src = data.image.data_url;
+        } else if (data.image?.width && data.image?.height && !state.image) {
+          state.width = data.image.width;
+          state.height = data.image.height;
+        }
+        render();
+      };
+      reader.readAsText(file);
+    }
+
+    function normalizeAnnotation(item, index) {
+      const bbox = item.bbox || {};
+      const x1 = Number(bbox.x1 ?? bbox.left ?? item.x1 ?? 0);
+      const y1 = Number(bbox.y1 ?? bbox.top ?? item.y1 ?? 0);
+      const x2 = Number(bbox.x2 ?? bbox.right ?? (x1 + Number(bbox.width ?? item.width ?? 1)));
+      const y2 = Number(bbox.y2 ?? bbox.bottom ?? (y1 + Number(bbox.height ?? item.height ?? 1)));
+      return {
+        id: item.id || `target_${String(index + 1).padStart(3, "0")}`,
+        label: item.label || "",
+        role: item.role || item.type || "button",
+        required: item.required !== false,
+        bbox: orderedBox(x1, y1, x2, y2),
+        notes: item.notes || "",
+      };
+    }
+
+    function fitCanvas() {
+      if (!state.image) return;
+      const available = Math.min(1100, Math.max(360, window.innerWidth - 460));
+      state.scale = Math.min(1, available / state.width);
+      canvas.width = Math.round(state.width * state.scale);
+      canvas.height = Math.round(state.height * state.scale);
+      emptyState.style.display = "none";
+    }
+
+    function startDraw(event) {
+      if (!state.image) return;
+      const point = canvasPoint(event);
+      const hit = hitTest(point);
+      if (hit) {
+        state.selectedId = hit.id;
+        render();
+        return;
+      }
+      state.dragging = { start: point, current: point };
+      state.selectedId = null;
+      render();
+    }
+
+    function updateDraw(event) {
+      if (!state.dragging) return;
+      state.dragging.current = canvasPoint(event);
+      render();
+    }
+
+    function finishDraw() {
+      if (!state.dragging) return;
+      const box = orderedBox(
+        state.dragging.start.x,
+        state.dragging.start.y,
+        state.dragging.current.x,
+        state.dragging.current.y,
+      );
+      state.dragging = null;
+      if (box.x2 - box.x1 < 4 || box.y2 - box.y1 < 4) {
+        render();
+        return;
+      }
+      const id = `target_${String(state.annotations.length + 1).padStart(3, "0")}`;
+      state.annotations.push({
+        id,
+        label: `target ${state.annotations.length + 1}`,
+        role: "button",
+        required: true,
+        bbox: box,
+        notes: "",
+      });
+      state.selectedId = id;
+      render();
+    }
+
+    function canvasPoint(event) {
+      const rect = canvas.getBoundingClientRect();
+      const x = clamp((event.clientX - rect.left) / state.scale, 0, state.width);
+      const y = clamp((event.clientY - rect.top) / state.scale, 0, state.height);
+      return { x: Math.round(x), y: Math.round(y) };
+    }
+
+    function hitTest(point) {
+      for (let i = state.annotations.length - 1; i >= 0; i -= 1) {
+        const item = state.annotations[i];
+        const b = item.bbox;
+        if (point.x >= b.x1 && point.x <= b.x2 && point.y >= b.y1 && point.y <= b.y2) {
+          return item;
+        }
+      }
+      return null;
+    }
+
+    function render() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (state.image) {
+        ctx.drawImage(state.image, 0, 0, canvas.width, canvas.height);
+      }
+      for (const item of state.annotations) {
+        drawAnnotation(item, item.id === state.selectedId);
+      }
+      if (state.dragging) {
+        const box = orderedBox(
+          state.dragging.start.x,
+          state.dragging.start.y,
+          state.dragging.current.x,
+          state.dragging.current.y,
+        );
+        drawBox(box, "#d94841", true, "new");
+      }
+      renderSide();
+    }
+
+    function drawAnnotation(item, selected) {
+      const color = selected ? "#d94841" : "#19a05a";
+      drawBox(item.bbox, color, selected, item.label || item.id);
+    }
+
+    function drawBox(box, color, selected, label) {
+      const x = box.x1 * state.scale;
+      const y = box.y1 * state.scale;
+      const w = (box.x2 - box.x1) * state.scale;
+      const h = (box.y2 - box.y1) * state.scale;
+      ctx.save();
+      ctx.lineWidth = selected ? 3 : 2;
+      ctx.strokeStyle = color;
+      ctx.fillStyle = selected ? "rgba(217,72,65,.08)" : "rgba(25,160,90,.07)";
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeRect(x, y, w, h);
+      ctx.fillStyle = "rgba(0,0,0,.72)";
+      ctx.fillRect(x, Math.max(0, y - 22), Math.min(220, Math.max(36, label.length * 8 + 12)), 22);
+      ctx.fillStyle = "#fff";
+      ctx.font = "12px system-ui, sans-serif";
+      ctx.fillText(label, x + 6, Math.max(14, y - 7));
+      ctx.restore();
+    }
+
+    function renderSide() {
+      imageMeta.textContent = state.image
+        ? `${state.imageName} · ${state.width}x${state.height}`
+        : "No image loaded";
+      countStat.textContent = String(state.annotations.length);
+      scaleStat.textContent = `${Math.round(state.scale * 100)}%`;
+      const hasImage = Boolean(state.image);
+      document.getElementById("exportBtn").disabled = !hasImage;
+      document.getElementById("copyBtn").disabled = !hasImage;
+      document.getElementById("clearBtn").disabled = state.annotations.length === 0;
+      document.getElementById("deleteBtn").disabled = !state.selectedId;
+      renderSelectedFields();
+      renderTable();
+    }
+
+    function renderSelectedFields() {
+      const item = selectedItem();
+      for (const input of Object.values(fields)) input.disabled = !item;
+      if (!item) {
+        for (const input of Object.values(fields)) input.value = "";
+        return;
+      }
+      fields.label.value = item.label;
+      fields.role.value = item.role;
+      fields.required.value = String(item.required);
+      fields.x1.value = item.bbox.x1;
+      fields.y1.value = item.bbox.y1;
+      fields.x2.value = item.bbox.x2;
+      fields.y2.value = item.bbox.y2;
+      fields.notes.value = item.notes;
+    }
+
+    function renderTable() {
+      table.innerHTML = "";
+      state.annotations.forEach((item, index) => {
+        const row = document.createElement("tr");
+        if (item.id === state.selectedId) row.classList.add("selected");
+        row.innerHTML = `
+          <td>${index + 1}</td>
+          <td>${escapeHtml(item.label || item.id)}</td>
+          <td>${escapeHtml(item.role)}</td>
+          <td>${item.bbox.x1},${item.bbox.y1} ${item.bbox.x2},${item.bbox.y2}</td>
+        `;
+        row.addEventListener("click", () => {
+          state.selectedId = item.id;
+          render();
+        });
+        table.appendChild(row);
+      });
+    }
+
+    function selectedItem() {
+      return state.annotations.find((item) => item.id === state.selectedId) || null;
+    }
+
+    function updateSelectedFromFields() {
+      const item = selectedItem();
+      if (!item) return;
+      item.label = fields.label.value;
+      item.role = fields.role.value;
+      item.required = fields.required.value === "true";
+      item.notes = fields.notes.value;
+      item.bbox = orderedBox(
+        Number(fields.x1.value),
+        Number(fields.y1.value),
+        Number(fields.x2.value),
+        Number(fields.y2.value),
+      );
+      render();
+    }
+
+    function deleteSelected() {
+      if (!state.selectedId) return;
+      state.annotations = state.annotations.filter((item) => item.id !== state.selectedId);
+      state.selectedId = state.annotations[0]?.id || null;
+      render();
+    }
+
+    function clearAnnotations() {
+      if (!confirm("清空全部标注？")) return;
+      state.annotations = [];
+      state.selectedId = null;
+      render();
+    }
+
+    function exportJson() {
+      const blob = new Blob([JSON.stringify(projectJson(), null, 2)], { type: "application/json" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `${baseName(state.imageName || "annotation")}.canpgrid.json`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    }
+
+    async function copyJson() {
+      await navigator.clipboard.writeText(JSON.stringify(projectJson(), null, 2));
+      const button = document.getElementById("copyBtn");
+      const original = button.textContent;
+      button.textContent = "已复制";
+      setTimeout(() => { button.textContent = original; }, 900);
+    }
+
+    function projectJson() {
+      return {
+        schema_version: "canpgrid.interactions.v1",
+        image: {
+          name: state.imageName,
+          width: state.width,
+          height: state.height,
+        },
+        annotations: state.annotations.map((item, index) => ({
+          id: item.id,
+          index,
+          label: item.label,
+          role: item.role,
+          required: item.required,
+          bbox: {
+            x1: item.bbox.x1,
+            y1: item.bbox.y1,
+            x2: item.bbox.x2,
+            y2: item.bbox.y2,
+            width: item.bbox.x2 - item.bbox.x1,
+            height: item.bbox.y2 - item.bbox.y1,
+          },
+          click_point: {
+            x: Math.round((item.bbox.x1 + item.bbox.x2) / 2),
+            y: Math.round((item.bbox.y1 + item.bbox.y2) / 2),
+          },
+          notes: item.notes,
+        })),
+      };
+    }
+
+    function orderedBox(x1, y1, x2, y2) {
+      return {
+        x1: Math.round(Math.min(x1, x2)),
+        y1: Math.round(Math.min(y1, y2)),
+        x2: Math.round(Math.max(x1, x2)),
+        y2: Math.round(Math.max(y1, y2)),
+      };
+    }
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      }[char]));
+    }
+
+    function baseName(name) {
+      return name.replace(/\.[^.]+$/, "") || "annotation";
+    }
+  </script>
+</body>
+</html>

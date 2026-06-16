@@ -8,6 +8,7 @@ from .core import (
     resolve_region,
     zoom_region,
 )
+from .evaluation import evaluate_interactions
 from .grid import suggest_grid_size
 from .render import draw_grid_overlay, draw_hybrid_overlay, draw_ruler_overlay
 
@@ -17,6 +18,7 @@ __all__ = [
     "draw_grid_overlay",
     "draw_hybrid_overlay",
     "draw_ruler_overlay",
+    "evaluate_interactions",
     "preview_point",
     "resolve_point",
     "resolve_region",

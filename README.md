@@ -253,6 +253,26 @@ real Kimi API calls; if `MOONSHOT_API_KEY` is missing, it fails instead of
 generating an offline model-test report. It compares direct model coordinates
 against the two-step CanpGrid cell-ruler workflow and records token usage.
 
+## Interaction Dataset Workbench
+
+Open `tools/annotation_workbench.html` in a browser to create manual clickable
+region annotations from any app screenshot. Upload a screenshot, draw clickable
+boxes, set labels and roles, then export a `canpgrid.interactions.v1` JSON
+manifest.
+
+Run a real model benchmark against those annotations:
+
+```bash
+MOONSHOT_API_KEY=... python examples/interaction_benchmark.py \
+  --image path/to/screenshot.png \
+  --annotations path/to/annotations.canpgrid.json
+```
+
+The benchmark asks the model to identify all visible interactive elements and
+classifies errors as missed interactives, false positives, localization errors,
+semantic mismatches, duplicates, or correct detections. See
+[docs/interaction-dataset.md](docs/interaction-dataset.md).
+
 ## Tests
 
 ```bash

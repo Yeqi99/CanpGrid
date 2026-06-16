@@ -79,6 +79,7 @@ def call_kimi(
     model: str,
     images: list[Path],
     prompt: str,
+    timeout: int = 120,
 ) -> dict[str, Any]:
     content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
     for image in images:
@@ -106,7 +107,7 @@ def call_kimi(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=120) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             data = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
