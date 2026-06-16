@@ -161,8 +161,13 @@ canpgrid preview-point examples/sample.png --levels '[{"grid_size":[12,7],"cell"
 - `hybrid_point`
 - `cell_ruler_point`
 - `subgrid_point`
+- `color_snap_point`
 
 更多内容见 `docs/`。
+
+`color_snap_point` 可以先解析一个粗略 base 点，再按颜色在原图像素里做
+最近搜索或方向扫描，把点吸附到附近第一个匹配颜色的像素上。它适合
+“模型已经选对部件，但最后几像素落不准”的场景。
 
 ## Calibration 方向
 

@@ -98,6 +98,108 @@ def test_resolve_cell_ruler_point() -> None:
     }
 
 
+def test_resolve_color_snap_point_ray(tmp_path) -> None:
+    image_path = tmp_path / "color-ray.png"
+    image = Image.new("RGB", (20, 20), "#ffffff")
+    for y in range(5, 16):
+        image.putpixel((12, y), (255, 0, 0))
+    image.save(image_path)
+
+    result = resolve_point(
+        image_path,
+        [],
+        {
+            "type": "color_snap_point",
+            "base": {"type": "normalized_point", "value": [0.5, 0.5]},
+            "target_color": "#ff0000",
+            "tolerance": 0,
+            "search": {"mode": "ray", "direction": "right", "max_distance": 5},
+        },
+    )
+
+    assert result["point_on_original"] == [12, 10]
+    assert result["point_resolution"]["base_point_on_original"] == [10, 10]
+    assert result["point_resolution"]["matched_color"] == [255, 0, 0]
+    assert result["point_resolution"]["search_mode"] == "ray"
+
+
+def test_resolve_color_snap_point_nearest(tmp_path) -> None:
+    image_path = tmp_path / "color-nearest.png"
+    image = Image.new("RGB", (20, 20), "#ffffff")
+    image.putpixel((7, 8), (0, 200, 80))
+    image.save(image_path)
+
+    result = resolve_point(
+        image_path,
+        [],
+        {
+            "type": "color_snap_point",
+            "base": {"type": "normalized_point", "value": [0.25, 0.25]},
+            "target_color": [0, 196, 84],
+            "tolerance": 8,
+            "search": {"mode": "nearest", "radius": 5},
+        },
+    )
+
+    assert result["point_on_original"] == [7, 8]
+    assert result["point_resolution"]["search_mode"] == "nearest"
+    assert result["point_resolution"]["matched"] is True
+
+
+def test_resolve_color_snap_point_requires_image_path() -> None:
+    with pytest.raises(ValueError, match="requires image_path"):
+        resolve_point(
+            image_size=(20, 20),
+            levels=[],
+            point_spec={
+                "type": "color_snap_point",
+                "base": {"type": "normalized_point", "value": [0.5, 0.5]},
+                "target_color": "#ff0000",
+            },
+        )
+
+
+def test_resolve_color_snap_point_raises_when_color_is_missing(tmp_path) -> None:
+    image_path = tmp_path / "missing-color.png"
+    Image.new("RGB", (20, 20), "#ffffff").save(image_path)
+
+    with pytest.raises(ValueError, match="did not find target_color"):
+        resolve_point(
+            image_path,
+            [],
+            {
+                "type": "color_snap_point",
+                "base": {"type": "normalized_point", "value": [0.5, 0.5]},
+                "target_color": "#ff0000",
+                "search": {"mode": "nearest", "radius": 4},
+            },
+        )
+
+
+def test_preview_color_snap_point_marks_snapped_point(tmp_path) -> None:
+    image_path = tmp_path / "preview-color-snap.png"
+    image = Image.new("RGB", (30, 30), "#ffffff")
+    image.putpixel((18, 15), (0, 0, 255))
+    image.save(image_path)
+
+    result = preview_point(
+        image_path,
+        [],
+        {
+            "type": "color_snap_point",
+            "base": {"type": "normalized_point", "value": [0.5, 0.5]},
+            "target_color": "blue",
+            "tolerance": 0,
+            "search": {"mode": "ray", "direction": "right", "max_distance": 5},
+        },
+        preview_on="original_image",
+        out_dir=tmp_path,
+    )
+
+    assert result["point_on_original"] == [18, 15]
+    assert result["point_resolution"]["type"] == "color_snap_point"
+
+
 def test_preview_point_rejects_unknown_marker_style(tmp_path) -> None:
     image_path = tmp_path / "sample.png"
 

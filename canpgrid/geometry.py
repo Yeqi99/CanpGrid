@@ -115,6 +115,9 @@ def resolve_point_in_bbox(bbox: BBox, point_spec: Mapping[str, Any]) -> Point:
             bbox.y1 + (cell[1] + local_y) * sub_height,
         )
 
+    if point_type == "color_snap_point":
+        raise ValueError("color_snap_point requires image pixels; use resolve_point")
+
     raise ValueError(f"unknown point_spec type: {point_type!r}")
 
 
@@ -134,6 +137,12 @@ def resolve_point_region_in_bbox(bbox: BBox, point_spec: Mapping[str, Any]) -> B
         grid_size = validate_grid_size(_sequence(point_spec.get("grid_size"), "grid_size"))
         cell = validate_cell(_sequence(point_spec.get("cell"), "cell"), grid_size)
         return _grid_cell_bbox(bbox, grid_size, cell)
+
+    if point_type == "color_snap_point":
+        base = point_spec.get("base")
+        if not isinstance(base, Mapping):
+            raise ValueError("color_snap_point requires a base point_spec mapping")
+        return resolve_point_region_in_bbox(bbox, base)
 
     if point_type in {
         "normalized_point",

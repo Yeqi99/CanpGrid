@@ -106,3 +106,56 @@ Negative offsets are supported.
 ```
 
 This describes a micro-grid inside the final resolved region.
+
+## color_snap_point
+
+```json
+{
+  "type": "color_snap_point",
+  "base": {
+    "type": "cell_ruler_point",
+    "grid_size": [9, 20],
+    "cell": [7, 1],
+    "x": 5,
+    "y": 4,
+    "ruler_size": [10, 10]
+  },
+  "target_color": "#34c759",
+  "tolerance": 24,
+  "search": {
+    "mode": "ray",
+    "direction": "right",
+    "max_distance": 40
+  }
+}
+```
+
+`color_snap_point` is a pixel-level snap after the model has already described
+a coarse candidate point. CanpGrid first resolves `base`, then searches original
+image pixels for `target_color`.
+
+Use it when the model can identify the right local object but cannot place the
+final point accurately enough by ruler ticks alone.
+
+Supported `target_color` forms:
+
+- `"#RRGGBB"`
+- `[r, g, b]`
+- `{"r": 52, "g": 199, "b": 89}`
+- common names such as `blue`, `red`, `green`, `black`, or `white`
+
+`tolerance` is an RGB distance, useful for antialiasing and screenshot
+compression.
+
+Supported search modes:
+
+- `nearest`: find the nearest matching pixel within `radius`.
+- `ray`: scan from the base point in `direction` and return the first matching
+  pixel within `max_distance`.
+
+`search.start_offset` can move the scan start in original-image pixels before
+searching. By default, a miss raises an error so the agent can relocalize. Set
+`fallback` to `base_point` only when a non-snapped coarse point is acceptable.
+
+The result includes `point_resolution` metadata with the base point, snapped
+point, matched color, search mode, and search bbox.

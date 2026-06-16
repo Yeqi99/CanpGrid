@@ -29,8 +29,10 @@ from .schemas import (
     PreviewPointResult,
     RegionResult,
     RulerConfig,
+    clean_point,
     coerce_levels,
 )
+from .snap import resolve_color_snap
 
 
 def create_grid_view(
@@ -211,12 +213,24 @@ def resolve_point(
 ) -> dict[str, Any]:
     if point_spec is None:
         raise ValueError("point_spec is required")
-    size = _resolve_image_size(image_path, image_size)
+    original = None
+    if _point_spec_requires_image(point_spec):
+        if image_path is None:
+            raise ValueError("color_snap_point requires image_path because it reads pixels")
+        original = load_image(image_path)
+        size = (original.width, original.height)
+    else:
+        size = _resolve_image_size(image_path, image_size)
     bbox = resolve_levels_to_bbox(size, levels)
-    point = resolve_point_in_bbox(bbox, point_spec)
-    point_region = resolve_point_region_in_bbox(bbox, point_spec)
+    point, point_region, point_resolution = _resolve_point_spec(
+        bbox,
+        point_spec,
+        image=original,
+    )
     return PointResult(
-        point_on_original=point, final_region_bbox_on_original=point_region
+        point_on_original=point,
+        final_region_bbox_on_original=point_region,
+        point_resolution=point_resolution,
     ).to_dict()
 
 
@@ -241,8 +255,11 @@ def preview_point(
     original = load_image(image_path)
     resolved_levels = coerce_levels(levels)
     bbox = resolve_levels_to_bbox((original.width, original.height), resolved_levels)
-    point_on_original = resolve_point_in_bbox(bbox, point_spec)
-    point_region = resolve_point_region_in_bbox(bbox, point_spec)
+    point_on_original, point_region, point_resolution = _resolve_point_spec(
+        bbox,
+        point_spec,
+        image=original,
+    )
     view_id = _view_id()
     out_path = Path(out_dir)
 
@@ -281,8 +298,50 @@ def preview_point(
         point_on_current_view=point_on_current_view,
         final_region_bbox_on_original=point_region,
         preview_image_paths=preview_paths if preview_on == "both" else None,
+        point_resolution=point_resolution,
     )
     return result.to_dict()
+
+
+def _resolve_point_spec(
+    bbox: BBox,
+    point_spec: Mapping[str, Any],
+    *,
+    image=None,
+) -> tuple[tuple[float, float], BBox, dict[str, Any] | None]:
+    if point_spec.get("type") != "color_snap_point":
+        return (
+            resolve_point_in_bbox(bbox, point_spec),
+            resolve_point_region_in_bbox(bbox, point_spec),
+            None,
+        )
+
+    if image is None:
+        raise ValueError("color_snap_point requires image pixels")
+    base_spec = point_spec.get("base")
+    if not isinstance(base_spec, Mapping):
+        raise ValueError("color_snap_point requires a base point_spec mapping")
+    base_point, _base_region, base_resolution = _resolve_point_spec(
+        bbox,
+        base_spec,
+        image=image,
+    )
+    snap = resolve_color_snap(image, base_point, point_spec)
+    resolution = {
+        **snap.metadata,
+        "base_point_on_original": clean_point(base_point),
+        "search_bbox_on_original": snap.search_bbox.to_dict(),
+    }
+    if base_resolution is not None:
+        resolution["base_resolution"] = base_resolution
+    return snap.point, snap.search_bbox, resolution
+
+
+def _point_spec_requires_image(point_spec: Mapping[str, Any]) -> bool:
+    if point_spec.get("type") == "color_snap_point":
+        return True
+    base = point_spec.get("base")
+    return isinstance(base, Mapping) and _point_spec_requires_image(base)
 
 
 def _resolve_image_size(

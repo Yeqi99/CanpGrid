@@ -92,6 +92,23 @@ def main() -> None:
             "ruler_size": [10, 10],
         },
     )
+    color_snap_point = resolve_point(
+        SAMPLE,
+        [],
+        {
+            "type": "color_snap_point",
+            "base": {
+                "type": "ruler_point",
+                "origin": "top_left",
+                "x": 120,
+                "y": 664,
+                "ruler_size": [1280, 720],
+            },
+            "target_color": "#6172f3",
+            "tolerance": 0,
+            "search": {"mode": "ray", "direction": "right", "max_distance": 60},
+        },
+    )
     first_preview = preview_point(
         SAMPLE,
         levels_2,
@@ -138,6 +155,26 @@ def main() -> None:
         zoom_factor=3,
         out_dir=OUT_DIR,
     )
+    color_snap_preview = preview_point(
+        SAMPLE,
+        [],
+        {
+            "type": "color_snap_point",
+            "base": {
+                "type": "ruler_point",
+                "origin": "top_left",
+                "x": 120,
+                "y": 664,
+                "ruler_size": [1280, 720],
+            },
+            "target_color": "#6172f3",
+            "tolerance": 0,
+            "search": {"mode": "ray", "direction": "right", "max_distance": 60},
+        },
+        preview_on="original_image",
+        marker_style="ring_crosshair",
+        out_dir=OUT_DIR,
+    )
 
     print(
         json.dumps(
@@ -151,9 +188,11 @@ def main() -> None:
                 "normalized_point": normalized_point,
                 "hybrid_point": hybrid_point,
                 "cell_ruler_point": cell_ruler_point,
+                "color_snap_point": color_snap_point,
                 "first_preview": first_preview,
                 "adjusted_preview": adjusted_preview,
                 "cell_ruler_preview": cell_ruler_preview,
+                "color_snap_preview": color_snap_preview,
             },
             ensure_ascii=False,
             indent=2,

@@ -208,10 +208,16 @@ Point specs include:
 - `hybrid_point`
 - `cell_ruler_point`
 - `subgrid_point`
+- `color_snap_point`
 
 See [docs/protocol.md](docs/protocol.md) and
 [docs/point-spec.md](docs/point-spec.md) for details. See
 [docs/preview-point.md](docs/preview-point.md) for point preview and self-check.
+
+`color_snap_point` lets an agent resolve a coarse base point, then snap to a
+nearby pixel with a chosen color by nearest search or directional ray scan. This
+helps when a model can pick the right UI part but cannot place the final point
+precisely enough by ruler ticks alone.
 
 ## Calibration Potential
 

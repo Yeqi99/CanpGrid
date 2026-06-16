@@ -61,6 +61,22 @@ The resolved `final_region_bbox_on_original` for `cell_ruler_point` is the
 selected cell bbox, not the larger parent view. This keeps previews and reports
 aligned with the actual region that the model refined.
 
+## Pixel color snap
+
+When a model can choose the right local area but still cannot land the final
+pixel accurately, it can use `color_snap_point`.
+
+The model provides:
+
+- a normal `base` point spec, such as `cell_ruler_point`
+- an approximate `target_color`
+- a search mode, either nearest-pixel search or directional ray scan
+
+CanpGrid resolves the base point, reads the original image pixels, and snaps to
+the first or nearest matching color. This is still observation assistance, not
+click execution. It does not identify UI objects by itself; it only refines an
+already chosen candidate point.
+
 ## Main output
 
 Every `create_grid_view` and `zoom_region` call creates a new annotated image.

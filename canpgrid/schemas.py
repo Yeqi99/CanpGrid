@@ -187,12 +187,16 @@ class RegionResult:
 class PointResult:
     point_on_original: Point
     final_region_bbox_on_original: BBox
+    point_resolution: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data: dict[str, Any] = {
             "point_on_original": clean_point(self.point_on_original),
             "final_region_bbox_on_original": self.final_region_bbox_on_original.to_dict(),
         }
+        if self.point_resolution is not None:
+            data["point_resolution"] = dict(self.point_resolution)
+        return data
 
 
 @dataclass(frozen=True)
@@ -202,6 +206,7 @@ class PreviewPointResult:
     final_region_bbox_on_original: BBox
     point_on_current_view: Point | None = None
     preview_image_paths: Mapping[str, Path] | None = None
+    point_resolution: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -215,6 +220,8 @@ class PreviewPointResult:
             data["preview_image_paths"] = {
                 key: str(value) for key, value in self.preview_image_paths.items()
             }
+        if self.point_resolution is not None:
+            data["point_resolution"] = dict(self.point_resolution)
         return data
 
 
