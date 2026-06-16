@@ -26,6 +26,9 @@ Then:
 4. Export the JSON manifest.
 
 The workbench stores coordinates in original-image pixels.
+Annotate content cards, news rows, search suggestions, and trend items when the
+app treats them as tappable. Leaving them out makes valid model predictions look
+like false positives.
 
 ## Manifest shape
 
