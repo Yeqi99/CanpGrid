@@ -281,6 +281,12 @@ classifies errors as missed interactives, false positives, localization errors,
 semantic mismatches, duplicates, or correct detections. See
 [docs/interaction-dataset.md](docs/interaction-dataset.md).
 
+By default it also runs an object-inventory-first pass: the model first lists
+unique clickable objects, then CanpGrid renders a multi-block context sheet
+around each object's rough grid cell and asks for at most one final point per
+`object_id`. This makes duplicate clicks and edge-of-cell localization mistakes
+much easier to diagnose.
+
 ## Tests
 
 ```bash

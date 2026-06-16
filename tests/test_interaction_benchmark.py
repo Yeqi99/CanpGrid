@@ -8,7 +8,11 @@ EXAMPLES = ROOT / "examples"
 if str(EXAMPLES) not in sys.path:
     sys.path.insert(0, str(EXAMPLES))
 
-from interaction_benchmark import parse_predictions  # noqa: E402
+from interaction_benchmark import (  # noqa: E402
+    dedupe_predictions_by_id,
+    parse_inventory,
+    parse_predictions,
+)
 
 
 def test_parse_predictions_uses_bbox_center_as_point_fallback() -> None:
@@ -142,3 +146,88 @@ def test_parse_predictions_accepts_duplicate_coordinate_arrays() -> None:
     )
 
     assert predictions[0]["click_point"] == {"x": 48.0, "y": 72.0}
+
+
+def test_parse_predictions_accepts_single_nested_coordinate_pair() -> None:
+    predictions = parse_predictions(
+        """
+        {
+          "items": [
+            {
+              "label": "AI search",
+              "role": "button",
+              "click_point": [[820, 140]]
+            }
+          ]
+        }
+        """,
+        (900, 2000),
+    )
+
+    assert predictions[0]["click_point"] == {"x": 820.0, "y": 140.0}
+
+
+def test_parse_predictions_uses_object_id_as_prediction_id() -> None:
+    predictions = parse_predictions(
+        """
+        {
+          "items": [
+            {
+              "object_id": "search_field",
+              "label": "search",
+              "role": "input",
+              "click_point": {"x": 20, "y": 30}
+            }
+          ]
+        }
+        """,
+        (100, 100),
+    )
+
+    assert predictions[0]["id"] == "search_field"
+
+
+def test_dedupe_predictions_by_id_keeps_highest_confidence() -> None:
+    predictions = dedupe_predictions_by_id(
+        [
+            {"id": "search", "confidence": 0.2, "click_point": {"x": 1, "y": 1}},
+            {"id": "search", "confidence": 0.9, "click_point": {"x": 2, "y": 2}},
+            {"id": "back", "confidence": 0.7, "click_point": {"x": 3, "y": 3}},
+        ]
+    )
+
+    assert [item["id"] for item in predictions] == ["search", "back"]
+    assert predictions[0]["click_point"] == {"x": 2, "y": 2}
+
+
+def test_parse_inventory_normalizes_unique_objects() -> None:
+    inventory = parse_inventory(
+        """
+        {
+          "objects": [
+            {
+              "object_id": "search_field",
+              "label": "search",
+              "role": "input",
+              "rough_grid_cell": {"col": 2, "row": 1}
+            },
+            {
+              "object_id": "search_field",
+              "label": "duplicate",
+              "rough_grid_cell": {"col": 3, "row": 1}
+            }
+          ]
+        }
+        """,
+        [9, 20],
+    )
+
+    assert inventory == [
+        {
+            "object_id": "search_field",
+            "label": "search",
+            "role": "input",
+            "rough_grid_cell": {"col": 2, "row": 1},
+            "confidence": None,
+        }
+    ]

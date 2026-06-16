@@ -39,6 +39,7 @@ def main() -> None:
     parser.add_argument("--out-dir", default=str(OUT_DIR))
     parser.add_argument("--grid-size", default="9x20")
     parser.add_argument("--react-rounds", type=int, default=1)
+    parser.add_argument("--object-agent", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--timeout", type=int, default=300)
     args = parser.parse_args()
 
@@ -104,10 +105,26 @@ def main() -> None:
         timeout=args.timeout,
         rounds=max(args.react_rounds, 0),
     )
+    object_agent = None
+    if args.object_agent:
+        object_agent = run_object_agent(
+            api_key=api_key,
+            base_url=args.base_url,
+            model=args.model,
+            image_path=image_path,
+            grid_image=grid_image,
+            image_size=image_size,
+            grid_size=grid_size,
+            timeout=args.timeout,
+            react_rounds=max(args.react_rounds, 0),
+        )
 
     direct_eval = evaluate_interactions(annotations, direct["predictions"])
     canpgrid_eval = evaluate_interactions(annotations, canpgrid["predictions"])
     react_eval = evaluate_interactions(annotations, canpgrid_react["predictions"])
+    object_eval = (
+        evaluate_interactions(annotations, object_agent["predictions"]) if object_agent else None
+    )
     direct_map = draw_prediction_map(
         image_path,
         direct_eval,
@@ -123,6 +140,13 @@ def main() -> None:
         react_eval,
         ASSET_DIR / "canpgrid_react_prediction_map.png",
     )
+    object_map = None
+    if object_agent and object_eval:
+        object_map = draw_prediction_map(
+            image_path,
+            object_eval,
+            ASSET_DIR / "object_agent_prediction_map.png",
+        )
 
     report = {
         "model": args.model,
@@ -152,6 +176,12 @@ def main() -> None:
             "prediction_map": str(react_map),
         },
     }
+    if object_agent and object_eval and object_map:
+        report["object_agent"] = {
+            **object_agent,
+            "evaluation": object_eval,
+            "prediction_map": str(object_map),
+        }
     json_path = OUT_DIR / "interaction_benchmark.json"
     json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     write_html(report, json_path)
@@ -230,6 +260,97 @@ def aggregate_usage(usages: Any) -> dict[str, Any] | None:
             if isinstance(value, int):
                 totals[key] = totals.get(key, 0) + value
     return totals or None
+
+
+def run_object_agent(
+    *,
+    api_key: str,
+    base_url: str,
+    model: str,
+    image_path: Path,
+    grid_image: Path,
+    image_size: tuple[int, int],
+    grid_size: list[int],
+    timeout: int,
+    react_rounds: int,
+) -> dict[str, Any]:
+    inventory_prompt_text = object_inventory_prompt(image_size, grid_size)
+    inventory_raw = call_kimi(
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        images=[image_path, grid_image],
+        prompt=inventory_prompt_text,
+        timeout=timeout,
+    )
+    try:
+        inventory = parse_inventory(inventory_raw["content"], grid_size)
+        inventory_error = None
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        inventory = []
+        inventory_error = str(exc)
+
+    context_sheet = draw_object_context_sheet(
+        image_path,
+        inventory,
+        grid_size,
+        ASSET_DIR / "object_agent_multiblock_context.png",
+    )
+    locate = run_model(
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        image_size=image_size,
+        images=[image_path, grid_image, context_sheet],
+        prompt=object_location_prompt(image_size, grid_size, inventory),
+        timeout=timeout,
+        grid_size=grid_size,
+    )
+    locate["predictions"] = dedupe_predictions_by_id(locate["predictions"])
+
+    review = None
+    final_predictions = locate["predictions"]
+    if react_rounds > 0:
+        preview_map = draw_candidate_preview_map(
+            image_path,
+            final_predictions,
+            ASSET_DIR / "object_agent_candidate_preview.png",
+        )
+        review = run_model(
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            image_size=image_size,
+            images=[image_path, grid_image, context_sheet, preview_map],
+            prompt=object_review_prompt(image_size, grid_size, inventory, final_predictions),
+            timeout=timeout,
+            grid_size=grid_size,
+        )
+        review["candidate_preview_map"] = str(preview_map)
+        review["predictions"] = dedupe_predictions_by_id(review["predictions"])
+        if review["predictions"]:
+            final_predictions = review["predictions"]
+
+    usage = aggregate_usage(
+        [
+            inventory_raw.get("usage"),
+            locate.get("usage"),
+            review.get("usage") if review else None,
+        ]
+    )
+    return {
+        "inventory": inventory,
+        "inventory_raw": inventory_raw,
+        "inventory_parse_error": inventory_error,
+        "context_sheet_path": str(context_sheet),
+        "locate": locate,
+        "review": review,
+        "predictions": final_predictions,
+        "usage": usage,
+        "prompt_chars": len(inventory_prompt_text)
+        + locate.get("prompt_chars", 0)
+        + ((review or {}).get("prompt_chars", 0)),
+    }
 
 
 def run_model(
@@ -403,6 +524,131 @@ def format_candidate_items(predictions: list[dict[str, Any]]) -> str:
     return json.dumps(items, ensure_ascii=False, separators=(",", ":"))
 
 
+def object_inventory_prompt(image_size: tuple[int, int], grid_size: list[int]) -> str:
+    width, height = image_size
+    return f"""
+You are looking at an app screenshot and a CanpGrid global grid overlay.
+First identify the unique visible clickable/tappable objects. This stage is
+object understanding only: do not return click coordinates.
+
+Return each interactive object exactly once. Include buttons, tabs, input fields,
+icon buttons, content cards, news rows, search suggestions, trend items, and
+other tappable entries. Do not include passive status text, decorative images,
+or layout chrome.
+
+For each object, provide a stable snake_case object_id, label, role, and a rough
+grid cell that contains the object or the best tap focus. The grid has
+{grid_size[0]} columns and {grid_size[1]} rows, zero-indexed. Image size is
+{width}x{height} pixels.
+
+Return raw JSON only:
+{{
+  "objects": [
+    {{
+      "object_id": "search_field",
+      "label": "search field",
+      "role": "input",
+      "rough_grid_cell": {{"col": 2, "row": 1}},
+      "confidence": 0.8
+    }}
+  ]
+}}
+"""
+
+
+def object_location_prompt(
+    image_size: tuple[int, int],
+    grid_size: list[int],
+    inventory: list[dict[str, Any]],
+) -> str:
+    width, height = image_size
+    objects = format_inventory_items(inventory)
+    return f"""
+You are given:
+1. the original screenshot
+2. the CanpGrid global grid overlay
+3. a multi-block context sheet with one panel per object. Each panel shows the
+   object's rough grid cell plus neighboring cells, so boundary objects stay in
+   context.
+
+Locate the click focus point for each object in this inventory. Return at most
+one point per object_id. Do not create a second point for an object that is
+already represented. Do not add objects outside the inventory in this stage.
+
+Inventory:
+{objects}
+
+Use structured CanpGrid coordinates: grid_cell plus normalized cell_point.
+Image size is {width}x{height} pixels. Grid cells are zero-indexed:
+columns 0..{grid_size[0] - 1}, rows 0..{grid_size[1] - 1}.
+
+Return raw JSON only:
+{{
+  "items": [
+    {{
+      "object_id": "search_field",
+      "label": "search field",
+      "role": "input",
+      "grid_cell": {{"col": 2, "row": 1}},
+      "cell_point": {{"x": 0.5, "y": 0.5}},
+      "confidence": 0.8
+    }}
+  ]
+}}
+"""
+
+
+def object_review_prompt(
+    image_size: tuple[int, int],
+    grid_size: list[int],
+    inventory: list[dict[str, Any]],
+    predictions: list[dict[str, Any]],
+) -> str:
+    width, height = image_size
+    objects = format_inventory_items(inventory)
+    candidates = format_candidate_items(predictions)
+    return f"""
+You are doing a final non-clicking visual self-check. You are given:
+1. original screenshot
+2. CanpGrid global grid overlay
+3. multi-block context sheet for the object inventory
+4. candidate preview image with numbered focus markers
+
+Inventory:
+{objects}
+
+Current candidate markers:
+{candidates}
+
+For each object_id, return one final click focus point at most. Confirm good
+markers, adjust inaccurate markers, and restore missing inventory objects when
+you can see them. Do not return two points for the same object_id.
+
+Use structured CanpGrid coordinates: grid_cell plus normalized cell_point.
+Image size is {width}x{height} pixels. Grid cells are zero-indexed:
+columns 0..{grid_size[0] - 1}, rows 0..{grid_size[1] - 1}.
+
+Return raw JSON only:
+{{
+  "items": [
+    {{
+      "object_id": "search_field",
+      "label": "search field",
+      "role": "input",
+      "grid_cell": {{"col": 2, "row": 1}},
+      "cell_point": {{"x": 0.5, "y": 0.5}},
+      "revision": "confirm",
+      "confidence": 0.8
+    }}
+  ]
+}}
+"""
+
+
+def format_inventory_items(inventory: list[dict[str, Any]]) -> str:
+    return json.dumps(inventory, ensure_ascii=False, separators=(",", ":"))
+
+
 def load_annotations(path: Path) -> list[dict[str, Any]]:
     data = json.loads(path.read_text(encoding="utf-8"))
     annotations = data.get("annotations", data.get("targets", []))
@@ -480,6 +726,70 @@ def parse_predictions(
     return predictions
 
 
+def parse_inventory(content: str, grid_size: list[int]) -> list[dict[str, Any]]:
+    data = json.loads(repair_common_json_key_typos(extract_json_text(content)))
+    if isinstance(data, list):
+        items = data
+    elif isinstance(data, dict):
+        items = data.get("objects", data.get("items", []))
+    else:
+        raise ValueError("inventory JSON must be an object or list")
+    if not isinstance(items, list):
+        raise ValueError("inventory JSON must contain an objects list")
+
+    inventory = []
+    seen = set()
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            continue
+        object_id = str(item.get("object_id", item.get("id", f"object_{index + 1:03d}")))
+        if not object_id or object_id in seen:
+            continue
+        seen.add(object_id)
+        cell_value = item.get("rough_grid_cell", item.get("grid_cell", item.get("cell")))
+        try:
+            col, row = normalize_cell(cell_value)
+        except (TypeError, ValueError):
+            col, row = 0.0, 0.0
+        inventory.append(
+            {
+                "object_id": object_id,
+                "label": str(item.get("label", item.get("name", object_id))),
+                "role": str(item.get("role", item.get("type", "button"))),
+                "rough_grid_cell": {
+                    "col": int(clamp(round(col), 0, grid_size[0] - 1)),
+                    "row": int(clamp(round(row), 0, grid_size[1] - 1)),
+                },
+                "confidence": item.get("confidence"),
+            }
+        )
+    return inventory
+
+
+def dedupe_predictions_by_id(predictions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    best_by_id: dict[str, dict[str, Any]] = {}
+    order = []
+    for prediction in predictions:
+        object_id = str(prediction.get("id", ""))
+        if not object_id:
+            continue
+        if object_id not in best_by_id:
+            best_by_id[object_id] = prediction
+            order.append(object_id)
+            continue
+        if confidence_value(prediction) > confidence_value(best_by_id[object_id]):
+            best_by_id[object_id] = prediction
+    return [best_by_id[object_id] for object_id in order]
+
+
+def confidence_value(prediction: dict[str, Any]) -> float:
+    value = prediction.get("confidence")
+    try:
+        return numberish(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def normalize_prediction(
     item: dict[str, Any],
     index: int,
@@ -501,7 +811,7 @@ def normalize_prediction(
         return None
 
     parsed: dict[str, Any] = {
-        "id": item.get("id", f"prediction_{index + 1:03d}"),
+        "id": item.get("id", item.get("object_id", f"prediction_{index + 1:03d}")),
         "index": index,
         "label": str(item.get("label", item.get("name", ""))),
         "role": str(item.get("role", item.get("type", ""))),
@@ -559,8 +869,13 @@ def normalize_point(value: Any, image_size: tuple[int, int]) -> dict[str, float]
     if isinstance(value, dict):
         x = numberish(value["x"])
         y = numberish(value["y"])
-    elif isinstance(value, (list, tuple)) and len(value) == 2:
-        x, y = [numberish(part) for part in value]
+    elif isinstance(value, (list, tuple)):
+        if len(value) == 1 and isinstance(value[0], (list, tuple)) and len(value[0]) == 2:
+            x, y = [numberish(part) for part in value[0]]
+        elif len(value) == 2:
+            x, y = [numberish(part) for part in value]
+        else:
+            raise ValueError("click_point must be mapping or [x,y]")
     else:
         raise ValueError("click_point must be mapping or [x,y]")
     width, height = image_size
@@ -767,6 +1082,146 @@ def draw_candidate_preview_map(
     return out_path
 
 
+def draw_object_context_sheet(
+    image_path: Path,
+    inventory: list[dict[str, Any]],
+    grid_size: list[int],
+    out_path: Path,
+    *,
+    context_radius: int = 1,
+    panel_size: tuple[int, int] = (360, 360),
+    columns: int = 3,
+) -> Path:
+    source = Image.open(image_path).convert("RGB")
+    font = ImageFont.load_default()
+    rows = max(1, (max(1, len(inventory)) + columns - 1) // columns)
+    header_height = 44
+    margin = 18
+    sheet = Image.new(
+        "RGB",
+        (
+            columns * panel_size[0] + (columns + 1) * margin,
+            rows * (panel_size[1] + header_height) + (rows + 1) * margin,
+        ),
+        "#f6f8fb",
+    )
+    draw = ImageDraw.Draw(sheet)
+
+    if not inventory:
+        draw.text((margin, margin), "no objects", fill="#334155", font=font)
+        return save_report_png(sheet, out_path)
+
+    for index, item in enumerate(inventory):
+        col_index = index % columns
+        row_index = index // columns
+        panel_x = margin + col_index * (panel_size[0] + margin)
+        panel_y = margin + row_index * (panel_size[1] + header_height + margin)
+        cell = item["rough_grid_cell"]
+        bbox = context_bbox_for_cell(
+            source.size,
+            grid_size,
+            (cell["col"], cell["row"]),
+            context_radius,
+        )
+        crop = source.crop(
+            (
+                round(bbox["x1"]),
+                round(bbox["y1"]),
+                round(bbox["x2"]),
+                round(bbox["y2"]),
+            )
+        )
+        crop.thumbnail(panel_size, Image.Resampling.LANCZOS)
+        label = f'{index + 1}. {item["object_id"]} cell {cell["col"]},{cell["row"]}'
+        draw.rounded_rectangle(
+            (panel_x, panel_y, panel_x + panel_size[0], panel_y + header_height - 6),
+            radius=6,
+            fill="#e8eef8",
+        )
+        draw.text((panel_x + 10, panel_y + 13), label, fill="#172033", font=font)
+        image_x = panel_x
+        image_y = panel_y + header_height
+        sheet.paste(crop, (image_x, image_y))
+        panel_bbox = (image_x, image_y, image_x + crop.width, image_y + crop.height)
+        draw.rectangle(panel_bbox, outline="#94a3b8", width=1)
+        draw_context_grid(
+            draw,
+            panel_bbox,
+            bbox,
+            source.size,
+            grid_size,
+            (cell["col"], cell["row"]),
+        )
+
+    return save_report_png(sheet, out_path)
+
+
+def save_report_png(image: Image.Image, out_path: Path) -> Path:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(out_path, format="PNG")
+    return out_path
+
+
+def context_bbox_for_cell(
+    image_size: tuple[int, int],
+    grid_size: list[int],
+    cell: tuple[int, int],
+    radius: int,
+) -> dict[str, float]:
+    width, height = image_size
+    cols, rows = grid_size
+    min_col = int(clamp(cell[0] - radius, 0, cols - 1))
+    max_col = int(clamp(cell[0] + radius, 0, cols - 1))
+    min_row = int(clamp(cell[1] - radius, 0, rows - 1))
+    max_row = int(clamp(cell[1] + radius, 0, rows - 1))
+    return {
+        "x1": min_col * (width / cols),
+        "y1": min_row * (height / rows),
+        "x2": (max_col + 1) * (width / cols),
+        "y2": (max_row + 1) * (height / rows),
+    }
+
+
+def draw_context_grid(
+    draw: ImageDraw.ImageDraw,
+    panel_bbox: tuple[int, int, int, int],
+    context_bbox: dict[str, float],
+    image_size: tuple[int, int],
+    grid_size: list[int],
+    focus_cell: tuple[int, int],
+) -> None:
+    panel_x1, panel_y1, panel_x2, panel_y2 = panel_bbox
+    scale_x = (panel_x2 - panel_x1) / (context_bbox["x2"] - context_bbox["x1"])
+    scale_y = (panel_y2 - panel_y1) / (context_bbox["y2"] - context_bbox["y1"])
+    width, height = image_size
+    cols, rows = grid_size
+    for col in range(cols + 1):
+        x = col * (width / cols)
+        if context_bbox["x1"] <= x <= context_bbox["x2"]:
+            px = panel_x1 + (x - context_bbox["x1"]) * scale_x
+            draw.line((px, panel_y1, px, panel_y2), fill="#38bdf8", width=1)
+    for row in range(rows + 1):
+        y = row * (height / rows)
+        if context_bbox["y1"] <= y <= context_bbox["y2"]:
+            py = panel_y1 + (y - context_bbox["y1"]) * scale_y
+            draw.line((panel_x1, py, panel_x2, py), fill="#38bdf8", width=1)
+
+    cell_x1 = focus_cell[0] * (width / cols)
+    cell_y1 = focus_cell[1] * (height / rows)
+    cell_x2 = (focus_cell[0] + 1) * (width / cols)
+    cell_y2 = (focus_cell[1] + 1) * (height / rows)
+    draw.rectangle(
+        (
+            panel_x1 + (cell_x1 - context_bbox["x1"]) * scale_x,
+            panel_y1 + (cell_y1 - context_bbox["y1"]) * scale_y,
+            panel_x1 + (cell_x2 - context_bbox["x1"]) * scale_x,
+            panel_y1 + (cell_y2 - context_bbox["y1"]) * scale_y,
+        ),
+        outline="#f59e0b",
+        width=3,
+    )
+
+
 def draw_bbox(
     draw: ImageDraw.ImageDraw,
     bbox: dict[str, Any],
@@ -806,19 +1261,30 @@ def write_html(report: dict[str, Any], json_path: Path) -> None:
     direct_summary = report["direct"]["evaluation"]["summary"]
     grid_summary = report["canpgrid"]["evaluation"]["summary"]
     react = report.get("canpgrid_react")
+    object_agent = report.get("object_agent")
     react_summary = react["evaluation"]["summary"] if react else None
-    rows = render_error_rows((react or report["canpgrid"])["evaluation"]["rows"])
+    object_summary = object_agent["evaluation"]["summary"] if object_agent else None
+    rows = render_error_rows((object_agent or react or report["canpgrid"])["evaluation"]["rows"])
     canpgrid_map = html.escape(relative_asset(report["canpgrid"]["prediction_map"]))
     react_map = html.escape(relative_asset(react["prediction_map"])) if react else ""
     react_preview = render_react_preview_figure(react)
+    object_figures = render_object_agent_figures(object_agent)
+    object_final_figure = render_object_agent_final_figure(object_agent)
     react_summary_row = (
         render_summary_row("CanpGrid + ReAct 自检", react_summary, react["usage"])
         if react and react_summary
         else ""
     )
+    object_summary_row = (
+        render_summary_row("对象清单 + 多区块 ReAct", object_summary, object_agent["usage"])
+        if object_agent and object_summary
+        else ""
+    )
     raw_direct = html.escape(report["direct"]["raw"]["content"])
     raw_grid = html.escape(report["canpgrid"]["raw"]["content"])
     raw_react = render_react_raw(react)
+    raw_object = render_object_agent_raw(object_agent)
+    process_notes = render_process_notes(report)
     document = f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -880,9 +1346,9 @@ def write_html(report: dict[str, Any], json_path: Path) -> None:
   <header>
     <h1>Interaction Benchmark</h1>
     <p class="muted">
-      标注真值来自手动圈选的可点击范围。模型只输出交互点击焦点，再按几何和标签
-      归类为漏识别、错识别、语义错或位置错误。预测图只画焦点点位，人工容差框
-      只在真值图中展示。
+      标注真值来自手动圈选的可点击范围。模型只输出交互点击焦点，
+      再按几何和标签归类为漏识别、错识别、语义错或位置错误。
+      预测图只画焦点点位，人工容差框只在真值图中展示。
     </p>
   </header>
   <main>
@@ -891,14 +1357,22 @@ def write_html(report: dict[str, Any], json_path: Path) -> None:
       <p class="muted">JSON: {html.escape(relative_asset(json_path))}</p>
       <table>
         <thead>
-          <tr><th>模式</th><th>分数</th><th>正确</th><th>语义错</th><th>漏识别</th><th>错识别</th><th>位置错</th><th>token</th></tr>
+          <tr>
+            <th>模式</th><th>分数</th><th>正确</th><th>语义错</th>
+            <th>漏识别</th><th>错识别</th><th>位置错</th><th>token</th>
+          </tr>
         </thead>
         <tbody>
           {render_summary_row("不用 CanpGrid", direct_summary, report["direct"]["usage"])}
           {render_summary_row("CanpGrid 单次识别", grid_summary, report["canpgrid"]["usage"])}
           {react_summary_row}
+          {object_summary_row}
         </tbody>
       </table>
+    </section>
+    <section>
+      <h2>流程说明</h2>
+      {process_notes}
     </section>
     <section>
       <h2>图像对比</h2>
@@ -924,6 +1398,8 @@ def write_html(report: dict[str, Any], json_path: Path) -> None:
           <img src="{react_map}" alt="canpgrid react">
           <figcaption>CanpGrid + ReAct 自检后的最终点击点。</figcaption>
         </figure>
+        {object_figures}
+        {object_final_figure}
       </div>
     </section>
     <section>
@@ -940,6 +1416,7 @@ def write_html(report: dict[str, Any], json_path: Path) -> None:
       <pre>{raw_direct}</pre>
       <pre>{raw_grid}</pre>
       {raw_react}
+      {raw_object}
     </section>
   </main>
 </body>
@@ -973,6 +1450,113 @@ def render_react_raw(react: dict[str, Any] | None) -> str:
         raw = (result.get("raw") or {}).get("content", "")
         blocks.append(f"<pre>{html.escape(raw)}</pre>")
     return "\n".join(blocks)
+
+
+def render_object_agent_figures(object_agent: dict[str, Any] | None) -> str:
+    if not object_agent:
+        return ""
+    figures = []
+    context = object_agent.get("context_sheet_path")
+    if context:
+        figures.append(
+            f"""
+        <figure>
+          <img src="{html.escape(relative_asset(context))}" alt="object context sheet">
+          <figcaption>对象清单生成的多区块上下文拼图。</figcaption>
+        </figure>
+"""
+        )
+    preview = ((object_agent.get("review") or {}).get("candidate_preview_map"))
+    if preview:
+        figures.append(
+            f"""
+        <figure>
+          <img src="{html.escape(relative_asset(preview))}" alt="object candidate preview">
+          <figcaption>对象定位后的候选点预览。</figcaption>
+        </figure>
+"""
+        )
+    return "\n".join(figures)
+
+
+def render_object_agent_final_figure(object_agent: dict[str, Any] | None) -> str:
+    if not object_agent:
+        return ""
+    prediction_map = object_agent.get("prediction_map")
+    if not prediction_map:
+        return ""
+    return f"""
+        <figure>
+          <img src="{html.escape(relative_asset(prediction_map))}" alt="object agent">
+          <figcaption>对象清单 + 多区块 ReAct 的最终点击点。</figcaption>
+        </figure>
+"""
+
+
+def render_object_agent_raw(object_agent: dict[str, Any] | None) -> str:
+    if not object_agent:
+        return ""
+    blocks = []
+    blocks.append(
+        "<pre>"
+        + html.escape((object_agent.get("inventory_raw") or {}).get("content", ""))
+        + "</pre>"
+    )
+    locate_raw = ((object_agent.get("locate") or {}).get("raw") or {}).get("content", "")
+    blocks.append("<pre>" + html.escape(locate_raw) + "</pre>")
+    review = object_agent.get("review")
+    if review:
+        blocks.append(
+            "<pre>" + html.escape((review.get("raw") or {}).get("content", "")) + "</pre>"
+        )
+    return "\n".join(blocks)
+
+
+def render_process_notes(report: dict[str, Any]) -> str:
+    object_agent = report.get("object_agent")
+    inventory_count = len((object_agent or {}).get("inventory") or [])
+    object_note = ""
+    if object_agent:
+        object_note = f"""
+        <tr>
+          <td>对象清单 + 多区块定位</td>
+          <td>
+            先让模型列出唯一可点击对象，再围绕每个对象的粗略格子
+            截取相邻区块。
+            本次对象清单有 {inventory_count} 个对象，定位阶段按 object_id 去重，
+            每个对象最多保留一个点击点。
+          </td>
+        </tr>
+"""
+    return f"""
+      <table>
+        <thead><tr><th>流程</th><th>含义</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>不用 CanpGrid</td>
+            <td>
+              模型直接看原图并输出绝对像素点，容易把语义判断和位置估计
+              混在一起。
+            </td>
+          </tr>
+          <tr>
+            <td>CanpGrid 单次识别</td>
+            <td>
+              模型看全局网格，用 grid_cell + cell_point 表达焦点，
+              CanpGrid 再换算成原图点。
+            </td>
+          </tr>
+          <tr>
+            <td>CanpGrid + ReAct 自检</td>
+            <td>
+              把候选点画成空心焦点预览图，模型再确认、调整、删除或
+              补充点位。
+            </td>
+          </tr>
+          {object_note}
+        </tbody>
+      </table>
+"""
 
 
 def render_summary_row(label: str, summary: dict[str, Any], usage: dict[str, Any] | None) -> str:

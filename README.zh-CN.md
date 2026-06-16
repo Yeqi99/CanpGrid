@@ -213,6 +213,10 @@ MOONSHOT_API_KEY=... python examples/interaction_benchmark.py \
 `docs/interaction-dataset.md`。
 默认还会增加一轮非点击执行的 ReAct 自检：先把 CanpGrid 单次候选点画成
 preview 图，再让模型根据预览确认、修正、删除或补充最终点位。
+脚本默认也会跑“对象清单优先”的流程：先让模型列出唯一的可点击对象，再围绕
+每个对象的粗略网格位置生成包含相邻格子的多区块上下文拼图，最后要求每个
+`object_id` 最多只返回一个点击点。这样重复点击和边界裁切导致的位置偏移会
+更容易看出来。
 
 ## 许可证
 

@@ -79,6 +79,9 @@ The benchmark always uses real model calls. It compares:
 - screenshot plus CanpGrid global grid observation
 - screenshot plus CanpGrid global grid observation, followed by a ReAct-style
   candidate preview self-check
+- object-inventory-first observation: the model first lists unique clickable
+  objects, then receives a multi-block context sheet for those objects and
+  returns at most one click point per `object_id`
 
 It asks the model to identify all visible interactive click points, not just a
 target list. If a model ignores the prompt and returns a bbox, the benchmark
@@ -94,6 +97,15 @@ The ReAct-style pass remains non-executing. It generates a candidate preview map
 from the single-pass CanpGrid points, sends that preview back to the model, and
 asks the model to confirm, adjust, remove, or add final focus points before
 scoring.
+
+The object-inventory-first pass is meant to prevent duplicate clicks and reduce
+edge-crop localization errors. The first call asks only "what clickable objects
+exist?" and returns stable object IDs plus rough grid cells. The benchmark then
+builds a context sheet where each panel contains the rough cell and neighboring
+cells. The location call uses that sheet and must return no more than one point
+per object ID. This keeps understanding and localization easier to debug:
+missing objects are inventory errors, while wrong points for known objects are
+localization errors.
 
 ## Error categories
 
