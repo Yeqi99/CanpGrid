@@ -40,9 +40,10 @@ python examples/kimi_ui_compare.py
 ```
 
 The script uses Kimi's OpenAI-compatible API endpoint
-`https://api.moonshot.ai/v1` and defaults to the multimodal `kimi-k2.6` model.
-It sends one source-only prompt and one CanpGrid-preview prompt, then stores raw
-model responses in:
+`https://api.moonshot.cn/v1`, defaults to the multimodal `kimi-k2.6` model, and
+disables model thinking for compact visible JSON output. It sends one
+source-only prompt and one CanpGrid-preview prompt, then stores raw model
+responses in:
 
 ```text
 outputs/codex_baseline_report/kimi_comparison.json

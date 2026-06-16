@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
+import io
 import json
 import mimetypes
 import os
@@ -17,7 +19,7 @@ if str(ROOT) not in sys.path:
 
 from codex_baseline_report import HTML_PATH, REPORT_DIR, main as generate_report
 
-DEFAULT_BASE_URL = "https://api.moonshot.ai/v1"
+DEFAULT_BASE_URL = "https://api.moonshot.cn/v1"
 DEFAULT_MODEL = "kimi-k2.6"
 
 
@@ -37,7 +39,8 @@ def main() -> None:
             "The key is intentionally not read from code or repository files."
         )
 
-    generate_report()
+    with contextlib.redirect_stdout(io.StringIO()):
+        generate_report()
     source = REPORT_DIR / "assets" / "automation_settings_source.png"
     canpgrid_map = REPORT_DIR / "assets" / "resolved_action_points.png"
 
@@ -76,11 +79,10 @@ def call_kimi(
     model: str,
     images: list[Path],
     prompt: str,
-) -> str:
-    content: list[dict[str, Any]] = []
+) -> dict[str, Any]:
+    content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
     for image in images:
         content.append({"type": "image_url", "image_url": {"url": image_data_url(image)}})
-    content.append({"type": "text", "text": prompt})
 
     payload = {
         "model": model,
@@ -91,6 +93,7 @@ def call_kimi(
             },
             {"role": "user", "content": content},
         ],
+        "thinking": {"type": "disabled"},
         "max_tokens": 2048,
     }
     request = urllib.request.Request(
@@ -108,7 +111,12 @@ def call_kimi(
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"Kimi API request failed: {exc.code} {body}") from exc
-    return data["choices"][0]["message"]["content"]
+    choice = data["choices"][0]
+    return {
+        "content": choice["message"].get("content", ""),
+        "finish_reason": choice.get("finish_reason"),
+        "usage": data.get("usage"),
+    }
 
 
 def image_data_url(path: Path) -> str:
