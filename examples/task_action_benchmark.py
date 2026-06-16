@@ -599,9 +599,9 @@ def evaluate_task_prediction(
     if parse_error or not prediction:
         return {"category": "parse_error", "score_0_to_100": 0, "parse_error": parse_error}
 
-    point = prediction["click_point"]
+    point = point_tuple(prediction["click_point"])
     for target_item in accepted_targets:
-        if point_in_bbox(point, target_item["bbox"]):
+        if point_in_bbox(point, bbox_tuple(target_item["bbox"])):
             return {
                 "category": "correct",
                 "score_0_to_100": 100,
@@ -616,13 +616,21 @@ def evaluate_task_prediction(
         }
 
     for target_item in screen["targets"]:
-        if point_in_bbox(point, target_item["bbox"]):
+        if point_in_bbox(point, bbox_tuple(target_item["bbox"])):
             return {
                 "category": "wrong_action",
                 "score_0_to_100": 0,
                 "landed_target_id": target_item["id"],
             }
     return {"category": "off_target", "score_0_to_100": 0}
+
+
+def point_tuple(point: dict[str, Any]) -> tuple[float, float]:
+    return float(point["x"]), float(point["y"])
+
+
+def bbox_tuple(bbox: dict[str, Any]) -> tuple[float, float, float, float]:
+    return float(bbox["x1"]), float(bbox["y1"]), float(bbox["x2"]), float(bbox["y2"])
 
 
 def summarize_task_results(results: list[dict[str, Any]]) -> dict[str, Any]:
