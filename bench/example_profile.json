@@ -1,0 +1,12 @@
+{
+  "model": "example-model",
+  "dataset": "example-dataset",
+  "best_overlay_mode": "hybrid",
+  "preferred_density": "medium",
+  "preferred_ruler_size": [16, 16],
+  "baseline_score": 0.0,
+  "overlay_score": 0.0,
+  "overlay_gain": 0.0,
+  "notes": "Example placeholder only. CanpGrid Core does not generate this profile."
+}
+
