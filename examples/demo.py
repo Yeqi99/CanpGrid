@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from canpgrid import create_grid_view, resolve_point, resolve_region, zoom_region
 
-ROOT = Path(__file__).resolve().parents[1]
 SAMPLE = ROOT / "examples" / "sample_images" / "sample.png"
 OUT_DIR = ROOT / "outputs" / "demo"
 

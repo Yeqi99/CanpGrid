@@ -171,6 +171,17 @@ python examples/demo.py
 
 Demo outputs are saved to `outputs/demo/`.
 
+## Version Observation Report
+
+```bash
+python examples/codex_baseline_report.py
+```
+
+This generates `outputs/codex_baseline_report/index.html`, an HTML report that
+shows a Codex-baseline localization trace for multiple visual parts in one
+image. It is a progress artifact for release review; it does not execute real
+clicks or add UI automation to Core.
+
 ## Tests
 
 ```bash
@@ -185,4 +196,3 @@ MIT License
 ## Branding
 
 Part of the CANPAI open agent infrastructure.
-

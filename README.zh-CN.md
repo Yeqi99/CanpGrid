@@ -124,11 +124,14 @@ Calibration 不属于 Core。未来可以比较不同模型在 none/grid/ruler/h
 
 ```bash
 python examples/demo.py
+python examples/codex_baseline_report.py
 pytest
 ruff check .
 ```
 
 Demo 输出保存在 `outputs/demo/`。
+Codex baseline 观察报告输出在 `outputs/codex_baseline_report/index.html`，
+用于查看一张图片里多个视觉部件从全图网格、局部放大到候选点位解析的全过程。
 
 ## 许可证
 
@@ -137,4 +140,3 @@ MIT License
 ## 品牌
 
 Part of the CANPAI open agent infrastructure.
-
